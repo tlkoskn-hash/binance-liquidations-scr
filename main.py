@@ -4,22 +4,19 @@ import datetime
 import requests
 import websockets
 
-from telegram import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    Update
-)
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
-    ContextTypes
+    ContextTypes,
 )
 
 from config import BOT_TOKEN, CHAT_ID, EXCLUDED_SYMBOLS
 
+# ─── BINANCE ─────────────────────────────────────────────────────
 BINANCE_WS = "wss://fstream.binance.com/ws/!forceOrder@arr"
-SYMBOLS_UPDATE_INTERVAL = 3600
+SYMBOLS_UPDATE_INTERVAL = 3600  # 1 час
 
 # ─── НАСТРОЙКИ (МЕНЯЮТСЯ КНОПКАМИ) ────────────────────────────────
 MIN_LIQUIDATION_USD = 20000
@@ -31,7 +28,7 @@ daily_counter = {}
 current_date = datetime.date.today()
 
 
-# ─── BINANCE ─────────────────────────────────────────────────────
+# ─── BINANCE SYMBOLS ─────────────────────────────────────────────
 def get_top_100_symbols():
     url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
     data = requests.get(url, timeout=10).json()
@@ -58,7 +55,7 @@ async def update_symbols_loop():
         await asyncio.sleep(SYMBOLS_UPDATE_INTERVAL)
 
 
-# ─── TELEGRAM UI ──────────────────────────────────────────────────
+# ─── TELEGRAM UI ─────────────────────────────────────────────────
 def start_keyboard():
     return InlineKeyboardMarkup([
         [
@@ -107,7 +104,7 @@ async def start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, reply_markup=start_keyboard())
 
 
-# ─── СИГНАЛЫ ──────────────────────────────────────────────────────
+# ─── SIGNALS ─────────────────────────────────────────────────────
 async def send_signal(symbol, side, volume, bot):
     global daily_counter, current_date
 
@@ -118,36 +115,42 @@ async def send_signal(symbol, side, volume, bot):
 
     daily_counter[symbol] = daily_counter.get(symbol, 0) + 1
 
-    # 🔴 SHORT | 🟢 LONG
+    # 🔴 SHORT ликвидирован | 🟢 LONG ликвидирован
     emoji = "🔴" if side == "BUY" else "🟢"
-    msg = f"{emoji} {symbol} {volume:,.0f}$ 🔔{daily_counter[symbol]}"
+    message = f"{emoji} {symbol} {volume:,.0f}$ 🔔{daily_counter[symbol]}"
 
-    await bot.send_message(chat_id=CHAT_ID, text=msg)
+    await bot.send_message(chat_id=CHAT_ID, text=message)
 
 
 async def listen_liquidations(app: Application):
-    async with websockets.connect(BINANCE_WS) as ws:
-        async for msg in ws:
-            if not BOT_ENABLED:
-                continue
+    while True:
+        try:
+            async with websockets.connect(BINANCE_WS) as ws:
+                async for msg in ws:
+                    if not BOT_ENABLED:
+                        continue
 
-            data = json.loads(msg)
-            for event in data:
-                o = event.get("o", {})
-                symbol = o.get("s")
+                    data = json.loads(msg)
+                    for event in data:
+                        o = event.get("o", {})
+                        symbol = o.get("s")
 
-                if symbol not in symbols:
-                    continue
+                        if symbol not in symbols:
+                            continue
 
-                price = float(o.get("p", 0))
-                qty = float(o.get("q", 0))
-                volume = price * qty
+                        price = float(o.get("p", 0))
+                        qty = float(o.get("q", 0))
+                        volume = price * qty
 
-                if volume < MIN_LIQUIDATION_USD:
-                    continue
+                        if volume < MIN_LIQUIDATION_USD:
+                            continue
 
-                side = o.get("S")
-                await send_signal(symbol, side, volume, app.bot)
+                        side = o.get("S")
+                        await send_signal(symbol, side, volume, app.bot)
+
+        except Exception as e:
+            print("[ERROR] WebSocket error:", e)
+            await asyncio.sleep(5)  # реконнект
 
 
 # ─── MAIN ─────────────────────────────────────────────────────────
@@ -157,13 +160,12 @@ async def main():
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CallbackQueryHandler(start_callback))
 
-    await app.initialize()
-    await app.start()
+    # фоновые задачи
+    asyncio.create_task(update_symbols_loop())
+    asyncio.create_task(listen_liquidations(app))
 
-    await asyncio.gather(
-        update_symbols_loop(),
-        listen_liquidations(app)
-    )
+    # ⬇️ ОБЯЗАТЕЛЬНО
+    await app.run_polling()
 
 
 if __name__ == "__main__":
