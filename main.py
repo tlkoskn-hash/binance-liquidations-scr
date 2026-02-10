@@ -16,9 +16,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# =====================================================
-# НАСТРОЙКИ
-# =====================================================
+# ================= НАСТРОЙКИ =================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -35,9 +33,7 @@ min_liq_usd = 20_000
 symbols = set()
 tasks = {}
 
-# =====================================================
-# TELEGRAM UI
-# =====================================================
+# ================= TELEGRAM UI =================
 
 def keyboard():
     return InlineKeyboardMarkup([
@@ -64,7 +60,6 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global bot_enabled, min_liq_usd
-
     q = update.callback_query
     await q.answer()
 
@@ -83,9 +78,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboard()
     )
 
-# =====================================================
-# TOP 100 SYMBOLS
-# =====================================================
+# ================= TOP 100 =================
 
 async def fetch_top_100():
     async with aiohttp.ClientSession() as session:
@@ -95,28 +88,20 @@ async def fetch_top_100():
     if not isinstance(data, list):
         return set()
 
-    pairs = []
-    for x in data:
-        if not isinstance(x, dict):
-            continue
-        if "symbol" not in x or "quoteVolume" not in x:
-            continue
-        if not x["symbol"].endswith("USDT"):
-            continue
-        if x["symbol"] in ("BTCUSDT", "ETHUSDT"):
-            continue
-        pairs.append(x)
+    pairs = [
+        x for x in data
+        if isinstance(x, dict)
+        and x.get("symbol", "").endswith("USDT")
+        and x["symbol"] not in ("BTCUSDT", "ETHUSDT")
+    ]
 
     pairs.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
     return {x["symbol"].lower() for x in pairs[:TOP_LIMIT]}
 
-# =====================================================
-# FORCE ORDER
-# =====================================================
+# ================= FORCE ORDER =================
 
-def coinglass_url(symbol: str) -> str:
-    base = symbol.replace("USDT", "").upper()
-    return f"https://www.coinglass.com/tv/{base}"
+def coinglass_url(symbol: str):
+    return f"https://www.coinglass.com/tv/{symbol.replace('USDT','').upper()}"
 
 async def listen_symbol(app: Application, symbol: str):
     url = f"{BINANCE_WS}/{symbol}@forceOrder"
@@ -124,50 +109,37 @@ async def listen_symbol(app: Application, symbol: str):
     while True:
         try:
             async with websockets.connect(url, ping_interval=20) as ws:
-                print(f"[WS] connected {symbol}")
-
                 async for msg in ws:
                     if not bot_enabled:
                         continue
 
-                    data = json.loads(msg)
-                    o = data.get("o")
+                    o = json.loads(msg).get("o")
                     if not o:
                         continue
 
-                    price = float(o["p"])
-                    qty = float(o["q"])
-                    usd = price * qty
-
+                    usd = float(o["p"]) * float(o["q"])
                     if usd < min_liq_usd:
                         continue
 
-                    side = o["S"]
-                    direction = "Long" if side == "SELL" else "Short"
+                    direction = "Long" if o["S"] == "SELL" else "Short"
                     emoji = "🟢" if direction == "Long" else "🔴"
-
                     sym = o["s"].replace("USDT", "")
-                    link = coinglass_url(o["s"])
 
                     await app.bot.send_message(
                         chat_id=CHAT_ID,
                         text=(
                             f"Binance {emoji} "
-                            f"<a href=\"{link}\">#{sym}</a> "
-                            f"rekt {direction}: "
-                            f"${usd:,.0f}"
+                            f"<a href=\"{coinglass_url(o['s'])}\">#{sym}</a> "
+                            f"rekt {direction}: ${usd:,.0f}"
                         ),
                         parse_mode="HTML",
                         disable_web_page_preview=True
                     )
-
         except Exception as e:
             print(f"[ERROR] {symbol}", e)
             await asyncio.sleep(5)
 
-# =====================================================
-# SYMBOL MANAGER
-# =====================================================
+# ================= SYMBOL MANAGER =================
 
 async def symbol_manager(app: Application):
     global symbols, tasks
@@ -187,24 +159,16 @@ async def symbol_manager(app: Application):
 
         await asyncio.sleep(SYMBOL_REFRESH_SEC)
 
-# =====================================================
-# MAIN
-# =====================================================
+# ================= MAIN =================
 
-async def main():
+def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CallbackQueryHandler(buttons))
 
-    await app.initialize()
-    await app.start()
-    await app.start_polling()
-
-    asyncio.create_task(symbol_manager(app))
-
-    print("[INFO] Bot fully started")
-    await asyncio.Event().wait()
+    app.create_task(symbol_manager(app))
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
