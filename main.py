@@ -29,12 +29,11 @@ BINANCE_WS = "wss://fstream.binance.com/ws"
 TOP_LIMIT = 100
 SYMBOL_REFRESH_SEC = 1800
 
-# динамические параметры
 bot_enabled = True
 min_liq_usd = 20_000
 
-symbols: set[str] = set()
-tasks: dict[str, asyncio.Task] = {}
+symbols = set()
+tasks = {}
 
 # =====================================================
 # TELEGRAM UI
@@ -85,16 +84,15 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # =====================================================
-# TOP 100 SYMBOLS (SAFE)
+# TOP 100 SYMBOLS
 # =====================================================
 
-async def fetch_top_100() -> set[str]:
+async def fetch_top_100():
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{BINANCE_REST}/fapi/v1/ticker/24hr") as r:
             data = await r.json()
 
     if not isinstance(data, list):
-        print("[ERROR] Binance returned invalid data")
         return set()
 
     pairs = []
@@ -113,7 +111,7 @@ async def fetch_top_100() -> set[str]:
     return {x["symbol"].lower() for x in pairs[:TOP_LIMIT]}
 
 # =====================================================
-# FORCE ORDER LISTENER
+# FORCE ORDER
 # =====================================================
 
 def coinglass_url(symbol: str) -> str:
@@ -175,21 +173,17 @@ async def symbol_manager(app: Application):
     global symbols, tasks
 
     while True:
-        try:
-            new_symbols = await fetch_top_100()
+        new_symbols = await fetch_top_100()
 
-            for s in new_symbols - symbols:
-                tasks[s] = asyncio.create_task(listen_symbol(app, s))
+        for s in new_symbols - symbols:
+            tasks[s] = asyncio.create_task(listen_symbol(app, s))
 
-            for s in symbols - new_symbols:
-                tasks[s].cancel()
-                del tasks[s]
+        for s in symbols - new_symbols:
+            tasks[s].cancel()
+            del tasks[s]
 
-            symbols = new_symbols
-            print(f"[INFO] active symbols: {len(symbols)}")
-
-        except Exception as e:
-            print("[ERROR] symbol_manager", e)
+        symbols = new_symbols
+        print(f"[INFO] active symbols: {len(symbols)}")
 
         await asyncio.sleep(SYMBOL_REFRESH_SEC)
 
@@ -205,10 +199,11 @@ async def main():
 
     await app.initialize()
     await app.start()
+    await app.start_polling()
 
     asyncio.create_task(symbol_manager(app))
 
-    print("[INFO] Bot started")
+    print("[INFO] Bot fully started")
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
