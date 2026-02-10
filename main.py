@@ -106,38 +106,48 @@ def coinglass_url(symbol: str):
 async def listen_symbol(app: Application, symbol: str):
     url = f"{BINANCE_WS}/{symbol}@forceOrder"
 
-    while True:
-        try:
-            async with websockets.connect(url, ping_interval=20) as ws:
-                async for msg in ws:
-                    if not bot_enabled:
-                        continue
+    try:
+        while True:
+            try:
+                async with websockets.connect(url, ping_interval=20) as ws:
+                    async for msg in ws:
+                        if not bot_enabled:
+                            continue
 
-                    o = json.loads(msg).get("o")
-                    if not o:
-                        continue
+                        o = json.loads(msg).get("o")
+                        if not o:
+                            continue
 
-                    usd = float(o["p"]) * float(o["q"])
-                    if usd < min_liq_usd:
-                        continue
+                        usd = float(o["p"]) * float(o["q"])
+                        if usd < min_liq_usd:
+                            continue
 
-                    direction = "Long" if o["S"] == "SELL" else "Short"
-                    emoji = "🟢" if direction == "Long" else "🔴"
-                    sym = o["s"].replace("USDT", "")
+                        direction = "Long" if o["S"] == "SELL" else "Short"
+                        emoji = "🟢" if direction == "Long" else "🔴"
+                        sym = o["s"].replace("USDT", "")
 
-                    await app.bot.send_message(
-                        chat_id=CHAT_ID,
-                        text=(
-                            f"Binance {emoji} "
-                            f"<a href=\"{coinglass_url(o['s'])}\">#{sym}</a> "
-                            f"rekt {direction}: ${usd:,.0f}"
-                        ),
-                        parse_mode="HTML",
-                        disable_web_page_preview=True
-                    )
-        except Exception as e:
-            print(f"[ERROR] {symbol}", e)
-            await asyncio.sleep(5)
+                        await app.bot.send_message(
+                            chat_id=CHAT_ID,
+                            text=(
+                                f"Binance {emoji} "
+                                f"<a href=\"{coinglass_url(o['s'])}\">#{sym}</a> "
+                                f"rekt {direction}: ${usd:,.0f}"
+                            ),
+                            parse_mode="HTML",
+                            disable_web_page_preview=True
+                        )
+
+            except asyncio.CancelledError:
+                print(f"[WS] {symbol} cancelled")
+                return
+
+            except Exception as e:
+                print(f"[WS ERROR] {symbol}", e)
+                await asyncio.sleep(5)
+
+    except asyncio.CancelledError:
+        print(f"[WS] {symbol} fully stopped")
+        return
 
 # ================= SYMBOL MANAGER =================
 
