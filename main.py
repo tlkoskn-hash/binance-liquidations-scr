@@ -100,7 +100,7 @@ async def fetch_top_100():
 # ================= FORCE ORDER =================
 
 def coinglass_url(symbol: str):
-    return f"https://www.coinglass.com/tv/Binance_{symbol.replace('USDT','').upper()}"
+    return f"https://www.coinglass.com/tv/Binance_{symbol.upper()}"
 
 async def listen_symbol(app: Application, symbol: str):
     url = f"{BINANCE_WS}/{symbol}@forceOrder"
@@ -194,3 +194,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
