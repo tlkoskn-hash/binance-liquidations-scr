@@ -19,7 +19,7 @@ BINANCE_WS = "wss://fstream.binance.com/ws/!forceOrder@arr"
 SYMBOLS_UPDATE_INTERVAL = 3600  # 1 час
 
 # ─── НАСТРОЙКИ (МЕНЯЮТСЯ КНОПКАМИ) ────────────────────────────────
-MIN_LIQUIDATION_USD = 20000
+MIN_LIQUIDATION_USD = 1000
 BOT_ENABLED = True
 # ─────────────────────────────────────────────────────────────────
 
@@ -200,3 +200,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
