@@ -90,8 +90,7 @@ async def fetch_top_100():
 
     pairs = [
         x for x in data
-        if isinstance(x, dict)
-        and x.get("symbol", "").endswith("USDT")
+        if x.get("symbol", "").endswith("USDT")
         and x["symbol"] not in ("BTCUSDT", "ETHUSDT")
     ]
 
@@ -101,53 +100,57 @@ async def fetch_top_100():
 # ================= FORCE ORDER =================
 
 def coinglass_url(symbol: str):
-    return f"https://www.coinglass.com/tv/{symbol.replace('USDT','').upper()}"
+    return f"https://www.coinglass.com/tv/Binance_{symbol.replace('USDT','').upper()}"
 
 async def listen_symbol(app: Application, symbol: str):
     url = f"{BINANCE_WS}/{symbol}@forceOrder"
+    ws = None
 
     try:
         while True:
             try:
-                async with websockets.connect(url, ping_interval=20) as ws:
-                    async for msg in ws:
-                        if not bot_enabled:
-                            continue
+                ws = await websockets.connect(url, ping_interval=20)
 
-                        o = json.loads(msg).get("o")
-                        if not o:
-                            continue
+                async for msg in ws:
+                    if not bot_enabled:
+                        continue
 
-                        usd = float(o["p"]) * float(o["q"])
-                        if usd < min_liq_usd:
-                            continue
+                    o = json.loads(msg).get("o")
+                    if not o:
+                        continue
 
-                        direction = "Long" if o["S"] == "SELL" else "Short"
-                        emoji = "🟢" if direction == "Long" else "🔴"
-                        sym = o["s"].replace("USDT", "")
+                    usd = float(o["p"]) * float(o["q"])
+                    if usd < min_liq_usd:
+                        continue
 
-                        await app.bot.send_message(
-                            chat_id=CHAT_ID,
-                            text=(
-                                f"Binance {emoji} "
-                                f"<a href=\"{coinglass_url(o['s'])}\">#{sym}</a> "
-                                f"rekt {direction}: ${usd:,.0f}"
-                            ),
-                            parse_mode="HTML",
-                            disable_web_page_preview=True
-                        )
+                    direction = "Long" if o["S"] == "SELL" else "Short"
+                    emoji = "🟢" if direction == "Long" else "🔴"
+                    sym = o["s"].replace("USDT", "")
+
+                    await app.bot.send_message(
+                        chat_id=CHAT_ID,
+                        text=(
+                            f"Binance {emoji} "
+                            f"<a href=\"{coinglass_url(o['s'])}\">#{sym}</a> "
+                            f"rekt {direction}: ${usd:,.0f}"
+                        ),
+                        parse_mode="HTML",
+                        disable_web_page_preview=True
+                    )
 
             except asyncio.CancelledError:
-                print(f"[WS] {symbol} cancelled")
-                return
-
+                break
             except Exception as e:
-                print(f"[WS ERROR] {symbol}", e)
+                print(f"[WS ERROR] {symbol}: {e}")
                 await asyncio.sleep(5)
 
-    except asyncio.CancelledError:
-        print(f"[WS] {symbol} fully stopped")
-        return
+    finally:
+        if ws and not ws.closed:
+            try:
+                await ws.close()
+            except Exception:
+                pass
+        print(f"[WS] {symbol} stopped cleanly")
 
 # ================= SYMBOL MANAGER =================
 
@@ -172,7 +175,7 @@ async def symbol_manager(app: Application):
 # ================= POST INIT =================
 
 async def post_init(app: Application):
-    app.create_task(symbol_manager(app))
+    asyncio.create_task(symbol_manager(app))
 
 # ================= MAIN =================
 
@@ -187,7 +190,7 @@ def main():
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CallbackQueryHandler(buttons))
 
-    app.run_polling()
+    app.run_polling(close_loop=False)
 
 if __name__ == "__main__":
     main()
