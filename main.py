@@ -3,31 +3,42 @@ import json
 import os
 import aiohttp
 import websockets
-from telegram import Bot
+
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+)
 
 # ================== НАСТРОЙКИ ==================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-MIN_LIQ_USD = 20_000        # минимум ликвидации
-TOP_LIMIT = 100             # сколько альтов
-SYMBOL_REFRESH_SEC = 1800   # обновление топа (30 мин)
+MIN_LIQ_USD = 20_000
+TOP_LIMIT = 100
+SYMBOL_REFRESH_SEC = 1800
 
 BINANCE_REST = "https://fapi.binance.com"
 BINANCE_WS = "wss://fstream.binance.com/ws"
 
-bot = Bot(token=BOT_TOKEN)
-
 symbols = set()
 tasks = {}
+
+# ================== TELEGRAM ==================
+
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "✅ Бот запущен и слушает ликвидации Binance Futures\n"
+        "Формат: Binance 🟢/🔴 #SYMBOL rekt Long/Short $"
+    )
 
 # ================== ТОП 100 АЛЬТОВ ==================
 
 async def fetch_top_100():
-    url = f"{BINANCE_REST}/fapi/v1/ticker/24hr"
     async with aiohttp.ClientSession() as session:
-        async with session.get(url) as r:
+        async with session.get(f"{BINANCE_REST}/fapi/v1/ticker/24hr") as r:
             data = await r.json()
 
     usdt_pairs = [
@@ -37,20 +48,18 @@ async def fetch_top_100():
     ]
 
     usdt_pairs.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
-
-    top = [x["symbol"].lower() for x in usdt_pairs[:TOP_LIMIT]]
-    return set(top)
+    return {x["symbol"].lower() for x in usdt_pairs[:TOP_LIMIT]}
 
 # ================== FORCE ORDER ==================
 
-async def listen_symbol(symbol: str):
+async def listen_symbol(app: Application, symbol: str):
     stream = f"{symbol}@forceOrder"
     url = f"{BINANCE_WS}/{stream}"
 
     while True:
         try:
             async with websockets.connect(url, ping_interval=20) as ws:
-                print(f"[WS] connected {symbol}")
+                print(f"[WS] {symbol} connected")
 
                 async for msg in ws:
                     data = json.loads(msg)
@@ -65,59 +74,60 @@ async def listen_symbol(symbol: str):
                     if usd < MIN_LIQ_USD:
                         continue
 
-                    side = o["S"]  # BUY / SELL
+                    side = o["S"]
                     direction = "Long" if side == "SELL" else "Short"
                     emoji = "🟢" if direction == "Long" else "🔴"
 
                     sym = o["s"].replace("USDT", "")
-
                     text = (
                         f"Binance {emoji} "
                         f"#{sym} rekt {direction}: "
                         f"${usd:,.0f}"
                     )
 
-                    await bot.send_message(chat_id=CHAT_ID, text=text)
-                    print("[LIQ]", text)
+                    await app.bot.send_message(chat_id=CHAT_ID, text=text)
 
         except Exception as e:
             print(f"[ERROR] {symbol}", e)
             await asyncio.sleep(3)
 
-# ================== ОБНОВЛЕНИЕ СПИСКА ==================
+# ================== SYMBOL MANAGER ==================
 
-async def symbol_manager():
+async def symbol_manager(app: Application):
     global symbols, tasks
 
     while True:
-        try:
-            new_symbols = await fetch_top_100()
+        new_symbols = await fetch_top_100()
 
-            added = new_symbols - symbols
-            removed = symbols - new_symbols
+        for sym in new_symbols - symbols:
+            tasks[sym] = asyncio.create_task(listen_symbol(app, sym))
 
-            for sym in added:
-                task = asyncio.create_task(listen_symbol(sym))
-                tasks[sym] = task
-                print(f"[ADD] {sym}")
+        for sym in symbols - new_symbols:
+            tasks[sym].cancel()
+            del tasks[sym]
 
-            for sym in removed:
-                tasks[sym].cancel()
-                del tasks[sym]
-                print(f"[REMOVE] {sym}")
-
-            symbols = new_symbols
-            print(f"[INFO] symbols active: {len(symbols)}")
-
-        except Exception as e:
-            print("[ERROR] symbol_manager", e)
+        symbols = new_symbols
+        print(f"[INFO] active symbols: {len(symbols)}")
 
         await asyncio.sleep(SYMBOL_REFRESH_SEC)
 
+# ================== LIFECYCLE ==================
+
+async def post_init(app: Application):
+    asyncio.create_task(symbol_manager(app))
+
 # ================== MAIN ==================
 
-async def main():
-    await symbol_manager()
+def main():
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
+
+    app.add_handler(CommandHandler("start", start_cmd))
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
