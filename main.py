@@ -14,10 +14,11 @@ from telegram.ext import (
 
 from config import BOT_TOKEN, CHAT_ID, EXCLUDED_SYMBOLS
 
+# ─── BINANCE ─────────────────────────────────────────────────────
 BINANCE_WS = "wss://fstream.binance.com/ws/!forceOrder@arr"
-SYMBOLS_UPDATE_INTERVAL = 3600
+SYMBOLS_UPDATE_INTERVAL = 3600  # 1 час
 
-# ─── НАСТРОЙКИ ────────────────────────────────────────────────────
+# ─── НАСТРОЙКИ (МЕНЯЮТСЯ КНОПКАМИ) ────────────────────────────────
 MIN_LIQUIDATION_USD = 20000
 BOT_ENABLED = True
 # ─────────────────────────────────────────────────────────────────
@@ -34,7 +35,7 @@ def get_top_100_symbols():
 
     filtered = [
         x for x in data
-        if x["symbol"].endswith("USDT")
+        if x.get("symbol", "").endswith("USDT")
         and x["symbol"] not in EXCLUDED_SYMBOLS
     ]
 
@@ -112,8 +113,10 @@ async def send_signal(symbol, side, volume, bot):
 
     daily_counter[symbol] = daily_counter.get(symbol, 0) + 1
 
+    # 🔴 SHORT ликвидирован | 🟢 LONG ликвидирован
     emoji = "🔴" if side == "BUY" else "🟢"
     msg = f"{emoji} {symbol} {volume:,.0f}$ 🔔{daily_counter[symbol]}"
+
     await bot.send_message(chat_id=CHAT_ID, text=msg)
 
 
@@ -126,33 +129,55 @@ async def listen_liquidations(app: Application):
                         continue
 
                     data = json.loads(msg)
-                    for event in data:
-                        o = event.get("o", {})
-                        symbol = o.get("s")
 
+                    # Binance иногда присылает не массив
+                    if not isinstance(data, list):
+                        continue
+
+                    for event in data:
+                        if not isinstance(event, dict):
+                            continue
+
+                        o = event.get("o")
+                        if not isinstance(o, dict):
+                            continue
+
+                        symbol = o.get("s")
                         if symbol not in symbols:
                             continue
 
-                        volume = float(o.get("p", 0)) * float(o.get("q", 0))
+                        try:
+                            price = float(o.get("p", 0))
+                            qty = float(o.get("q", 0))
+                        except (TypeError, ValueError):
+                            continue
+
+                        volume = price * qty
                         if volume < MIN_LIQUIDATION_USD:
                             continue
 
-                        await send_signal(symbol, o.get("S"), volume, app.bot)
+                        side = o.get("S")
+                        await send_signal(symbol, side, volume, app.bot)
 
         except Exception as e:
             print("[ERROR] WebSocket:", e)
-            await asyncio.sleep(5)
+            await asyncio.sleep(5)  # реконнект
 
 
-# ─── POST INIT ───────────────────────────────────────────────────
+# ─── POST INIT (ПРАВИЛЬНЫЙ СТАРТ ФОНА) ────────────────────────────
 async def post_init(app: Application):
-    app.create_task(update_symbols_loop())
-    app.create_task(listen_liquidations(app))
+    asyncio.create_task(update_symbols_loop())
+    asyncio.create_task(listen_liquidations(app))
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────
 def main():
-    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CallbackQueryHandler(start_callback))
