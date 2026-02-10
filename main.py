@@ -51,13 +51,10 @@ def settings_keyboard():
     ])
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
-        "⚙️ *Настройки ликвидаций Binance*\n\n"
-        f"Статус: *{'ВКЛЮЧЕН' if bot_enabled else 'ВЫКЛЮЧЕН'}*\n"
-        f"Мин. сумма: *{min_liq_usd:,}$*"
-    )
     await update.message.reply_text(
-        text,
+        f"⚙️ *Настройки ликвидаций Binance*\n\n"
+        f"Статус: *{'ВКЛЮЧЕН' if bot_enabled else 'ВЫКЛЮЧЕН'}*\n"
+        f"Мин. сумма: *{min_liq_usd:,}$*",
         parse_mode="Markdown",
         reply_markup=settings_keyboard()
     )
@@ -70,21 +67,15 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if q.data == "toggle":
         bot_enabled = not bot_enabled
-
     elif q.data == "inc":
         min_liq_usd += 5000
-
     elif q.data == "dec":
         min_liq_usd = max(1000, min_liq_usd - 5000)
 
-    text = (
-        "⚙️ *Настройки ликвидаций Binance*\n\n"
-        f"Статус: *{'ВКЛЮЧЕН' if bot_enabled else 'ВЫКЛЮЧЕН'}*\n"
-        f"Мин. сумма: *{min_liq_usd:,}$*"
-    )
-
     await q.edit_message_text(
-        text,
+        f"⚙️ *Настройки ликвидаций Binance*\n\n"
+        f"Статус: *{'ВКЛЮЧЕН' if bot_enabled else 'ВЫКЛЮЧЕН'}*\n"
+        f"Мин. сумма: *{min_liq_usd:,}$*",
         parse_mode="Markdown",
         reply_markup=settings_keyboard()
     )
@@ -141,16 +132,14 @@ async def listen_symbol(app: Application, symbol: str):
                     sym = o["s"].replace("USDT", "")
                     link = coinglass_url(o["s"])
 
-                    text = (
-                        f"Binance {emoji} "
-                        f"<a href=\"{link}\">#{sym}</a> "
-                        f"rekt {direction}: "
-                        f"${usd:,.0f}"
-                    )
-
                     await app.bot.send_message(
                         chat_id=CHAT_ID,
-                        text=text,
+                        text=(
+                            f"Binance {emoji} "
+                            f"<a href=\"{link}\">#{sym}</a> "
+                            f"rekt {direction}: "
+                            f"${usd:,.0f}"
+                        ),
                         parse_mode="HTML",
                         disable_web_page_preview=True
                     )
@@ -179,25 +168,20 @@ async def symbol_manager(app: Application):
 
         await asyncio.sleep(SYMBOL_REFRESH_SEC)
 
-# ================== LIFECYCLE ==================
-
-async def post_init(app: Application):
-    asyncio.create_task(symbol_manager(app))
-
 # ================== MAIN ==================
 
-def main():
-    app = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .post_init(post_init)
-        .build()
-    )
+async def main():
+    app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CallbackQueryHandler(buttons))
 
-    app.run_polling()
+    await app.initialize()
+    await app.start()
+
+    asyncio.create_task(symbol_manager(app))
+
+    await asyncio.Event().wait()  # держим процесс живым
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
