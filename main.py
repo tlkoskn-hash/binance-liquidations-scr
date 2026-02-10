@@ -159,15 +159,24 @@ async def symbol_manager(app: Application):
 
         await asyncio.sleep(SYMBOL_REFRESH_SEC)
 
+# ================= POST INIT =================
+
+async def post_init(app: Application):
+    app.create_task(symbol_manager(app))
+
 # ================= MAIN =================
 
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CallbackQueryHandler(buttons))
 
-    app.create_task(symbol_manager(app))
     app.run_polling()
 
 if __name__ == "__main__":
