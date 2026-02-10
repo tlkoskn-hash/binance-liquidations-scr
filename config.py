@@ -1,0 +1,7 @@
+import os
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+
+MIN_LIQUIDATION_USD = 20000
+EXCLUDED_SYMBOLS = {"BTCUSDT", "ETHUSDT"}
