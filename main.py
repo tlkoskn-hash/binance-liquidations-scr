@@ -3,7 +3,6 @@ import json
 import datetime
 import requests
 import websockets
-import threading
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -16,7 +15,7 @@ from telegram.ext import (
 from config import BOT_TOKEN, CHAT_ID, EXCLUDED_SYMBOLS
 
 BINANCE_WS = "wss://fstream.binance.com/ws/!forceOrder@arr"
-SYMBOLS_UPDATE_INTERVAL = 3600  # 1 час
+SYMBOLS_UPDATE_INTERVAL = 3600
 
 # ─── НАСТРОЙКИ ────────────────────────────────────────────────────
 MIN_LIQUIDATION_USD = 20000
@@ -115,7 +114,6 @@ async def send_signal(symbol, side, volume, bot):
 
     emoji = "🔴" if side == "BUY" else "🟢"
     msg = f"{emoji} {symbol} {volume:,.0f}$ 🔔{daily_counter[symbol]}"
-
     await bot.send_message(chat_id=CHAT_ID, text=msg)
 
 
@@ -142,30 +140,22 @@ async def listen_liquidations(app: Application):
                         await send_signal(symbol, o.get("S"), volume, app.bot)
 
         except Exception as e:
-            print("[ERROR] WebSocket error:", e)
+            print("[ERROR] WebSocket:", e)
             await asyncio.sleep(5)
 
 
-# ─── THREAD LAUNCHER ─────────────────────────────────────────────
-def start_async_tasks(app):
-    asyncio.run(asyncio.gather(
-        update_symbols_loop(),
-        listen_liquidations(app)
-    ))
+# ─── POST INIT ───────────────────────────────────────────────────
+async def post_init(app: Application):
+    app.create_task(update_symbols_loop())
+    app.create_task(listen_liquidations(app))
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────
 def main():
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CallbackQueryHandler(start_callback))
-
-    threading.Thread(
-        target=start_async_tasks,
-        args=(app,),
-        daemon=True
-    ).start()
 
     app.run_polling()
 
