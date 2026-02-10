@@ -19,7 +19,7 @@ BINANCE_WS = "wss://fstream.binance.com/stream"
 SYMBOLS_UPDATE_INTERVAL = 3600  # 1 час
 
 # ─── НАСТРОЙКИ ───────────────────────────────────────────────────
-MIN_LIQUIDATION_USD = 1000
+MIN_LIQUIDATION_USD = 100
 BOT_ENABLED = True
 # ─────────────────────────────────────────────────────────────────
 
@@ -211,3 +211,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
