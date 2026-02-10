@@ -134,6 +134,7 @@ async def listen_liquidations(app: Application):
                             continue
 
                         data = json.loads(msg)
+                        print"[DEBUG] WS message received")
                         if not isinstance(data, list):
                             continue
 
@@ -200,4 +201,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
