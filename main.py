@@ -16,7 +16,9 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# ================== НАСТРОЙКИ ==================
+# =====================================================
+# НАСТРОЙКИ
+# =====================================================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -27,16 +29,18 @@ BINANCE_WS = "wss://fstream.binance.com/ws"
 TOP_LIMIT = 100
 SYMBOL_REFRESH_SEC = 1800
 
-# --- динамические настройки ---
+# динамические параметры
 bot_enabled = True
 min_liq_usd = 20_000
 
-symbols = set()
-tasks = {}
+symbols: set[str] = set()
+tasks: dict[str, asyncio.Task] = {}
 
-# ================== TELEGRAM UI ==================
+# =====================================================
+# TELEGRAM UI
+# =====================================================
 
-def settings_keyboard():
+def keyboard():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
@@ -52,11 +56,11 @@ def settings_keyboard():
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        f"⚙️ *Настройки ликвидаций Binance*\n\n"
+        f"⚙️ *Ликвидации Binance Futures*\n\n"
         f"Статус: *{'ВКЛЮЧЕН' if bot_enabled else 'ВЫКЛЮЧЕН'}*\n"
         f"Мин. сумма: *{min_liq_usd:,}$*",
         parse_mode="Markdown",
-        reply_markup=settings_keyboard()
+        reply_markup=keyboard()
     )
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -73,42 +77,57 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         min_liq_usd = max(1000, min_liq_usd - 5000)
 
     await q.edit_message_text(
-        f"⚙️ *Настройки ликвидаций Binance*\n\n"
+        f"⚙️ *Ликвидации Binance Futures*\n\n"
         f"Статус: *{'ВКЛЮЧЕН' if bot_enabled else 'ВЫКЛЮЧЕН'}*\n"
         f"Мин. сумма: *{min_liq_usd:,}$*",
         parse_mode="Markdown",
-        reply_markup=settings_keyboard()
+        reply_markup=keyboard()
     )
 
-# ================== ТОП 100 АЛЬТОВ ==================
+# =====================================================
+# TOP 100 SYMBOLS (SAFE)
+# =====================================================
 
-async def fetch_top_100():
+async def fetch_top_100() -> set[str]:
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{BINANCE_REST}/fapi/v1/ticker/24hr") as r:
             data = await r.json()
 
-    pairs = [
-        x for x in data
-        if x["symbol"].endswith("USDT")
-        and x["symbol"] not in ("BTCUSDT", "ETHUSDT")
-    ]
+    if not isinstance(data, list):
+        print("[ERROR] Binance returned invalid data")
+        return set()
+
+    pairs = []
+    for x in data:
+        if not isinstance(x, dict):
+            continue
+        if "symbol" not in x or "quoteVolume" not in x:
+            continue
+        if not x["symbol"].endswith("USDT"):
+            continue
+        if x["symbol"] in ("BTCUSDT", "ETHUSDT"):
+            continue
+        pairs.append(x)
 
     pairs.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
     return {x["symbol"].lower() for x in pairs[:TOP_LIMIT]}
 
-# ================== FORCE ORDER ==================
+# =====================================================
+# FORCE ORDER LISTENER
+# =====================================================
 
 def coinglass_url(symbol: str) -> str:
     base = symbol.replace("USDT", "").upper()
     return f"https://www.coinglass.com/tv/{base}"
 
 async def listen_symbol(app: Application, symbol: str):
-    stream = f"{symbol}@forceOrder"
-    url = f"{BINANCE_WS}/{stream}"
+    url = f"{BINANCE_WS}/{symbol}@forceOrder"
 
     while True:
         try:
             async with websockets.connect(url, ping_interval=20) as ws:
+                print(f"[WS] connected {symbol}")
+
                 async for msg in ws:
                     if not bot_enabled:
                         continue
@@ -146,29 +165,37 @@ async def listen_symbol(app: Application, symbol: str):
 
         except Exception as e:
             print(f"[ERROR] {symbol}", e)
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)
 
-# ================== SYMBOL MANAGER ==================
+# =====================================================
+# SYMBOL MANAGER
+# =====================================================
 
 async def symbol_manager(app: Application):
     global symbols, tasks
 
     while True:
-        new_symbols = await fetch_top_100()
+        try:
+            new_symbols = await fetch_top_100()
 
-        for sym in new_symbols - symbols:
-            tasks[sym] = asyncio.create_task(listen_symbol(app, sym))
+            for s in new_symbols - symbols:
+                tasks[s] = asyncio.create_task(listen_symbol(app, s))
 
-        for sym in symbols - new_symbols:
-            tasks[sym].cancel()
-            del tasks[sym]
+            for s in symbols - new_symbols:
+                tasks[s].cancel()
+                del tasks[s]
 
-        symbols = new_symbols
-        print(f"[INFO] active symbols: {len(symbols)}")
+            symbols = new_symbols
+            print(f"[INFO] active symbols: {len(symbols)}")
+
+        except Exception as e:
+            print("[ERROR] symbol_manager", e)
 
         await asyncio.sleep(SYMBOL_REFRESH_SEC)
 
-# ================== MAIN ==================
+# =====================================================
+# MAIN
+# =====================================================
 
 async def main():
     app = Application.builder().token(BOT_TOKEN).build()
@@ -181,7 +208,8 @@ async def main():
 
     asyncio.create_task(symbol_manager(app))
 
-    await asyncio.Event().wait()  # держим процесс живым
+    print("[INFO] Bot started")
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
