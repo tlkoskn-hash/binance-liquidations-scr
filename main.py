@@ -27,6 +27,8 @@ symbols = set()
 daily_counter = {}
 current_date = datetime.date.today()
 
+background_tasks = []
+
 
 # ─── BINANCE SYMBOLS ─────────────────────────────────────────────
 def get_top_100_symbols():
@@ -44,15 +46,18 @@ def get_top_100_symbols():
 
 
 async def update_symbols_loop():
-    global symbols
-    while True:
-        try:
-            symbols = get_top_100_symbols()
-            print(f"[INFO] Symbols updated: {len(symbols)}")
-        except Exception as e:
-            print("[ERROR] Symbols update failed:", e)
+    try:
+        while True:
+            try:
+                symbols.clear()
+                symbols.update(get_top_100_symbols())
+                print(f"[INFO] Symbols updated: {len(symbols)}")
+            except Exception as e:
+                print("[ERROR] Symbols update failed:", e)
 
-        await asyncio.sleep(SYMBOLS_UPDATE_INTERVAL)
+            await asyncio.sleep(SYMBOLS_UPDATE_INTERVAL)
+    except asyncio.CancelledError:
+        print("[INFO] update_symbols_loop cancelled")
 
 
 # ─── TELEGRAM UI ─────────────────────────────────────────────────
@@ -113,7 +118,6 @@ async def send_signal(symbol, side, volume, bot):
 
     daily_counter[symbol] = daily_counter.get(symbol, 0) + 1
 
-    # 🔴 SHORT ликвидирован | 🟢 LONG ликвидирован
     emoji = "🔴" if side == "BUY" else "🟢"
     msg = f"{emoji} {symbol} {volume:,.0f}$ 🔔{daily_counter[symbol]}"
 
@@ -121,53 +125,61 @@ async def send_signal(symbol, side, volume, bot):
 
 
 async def listen_liquidations(app: Application):
-    while True:
-        try:
-            async with websockets.connect(BINANCE_WS) as ws:
-                async for msg in ws:
-                    if not BOT_ENABLED:
-                        continue
-
-                    data = json.loads(msg)
-
-                    # Binance иногда присылает не массив
-                    if not isinstance(data, list):
-                        continue
-
-                    for event in data:
-                        if not isinstance(event, dict):
+    try:
+        while True:
+            try:
+                async with websockets.connect(BINANCE_WS) as ws:
+                    async for msg in ws:
+                        if not BOT_ENABLED:
                             continue
 
-                        o = event.get("o")
-                        if not isinstance(o, dict):
+                        data = json.loads(msg)
+                        if not isinstance(data, list):
                             continue
 
-                        symbol = o.get("s")
-                        if symbol not in symbols:
-                            continue
+                        for event in data:
+                            if not isinstance(event, dict):
+                                continue
 
-                        try:
-                            price = float(o.get("p", 0))
-                            qty = float(o.get("q", 0))
-                        except (TypeError, ValueError):
-                            continue
+                            o = event.get("o")
+                            if not isinstance(o, dict):
+                                continue
 
-                        volume = price * qty
-                        if volume < MIN_LIQUIDATION_USD:
-                            continue
+                            symbol = o.get("s")
+                            if symbol not in symbols:
+                                continue
 
-                        side = o.get("S")
-                        await send_signal(symbol, side, volume, app.bot)
+                            try:
+                                price = float(o.get("p", 0))
+                                qty = float(o.get("q", 0))
+                            except (TypeError, ValueError):
+                                continue
 
-        except Exception as e:
-            print("[ERROR] WebSocket:", e)
-            await asyncio.sleep(5)  # реконнект
+                            volume = price * qty
+                            if volume < MIN_LIQUIDATION_USD:
+                                continue
+
+                            await send_signal(symbol, o.get("S"), volume, app.bot)
+
+            except Exception as e:
+                print("[ERROR] WebSocket:", e)
+                await asyncio.sleep(5)
+    except asyncio.CancelledError:
+        print("[INFO] listen_liquidations cancelled")
 
 
-# ─── POST INIT (ПРАВИЛЬНЫЙ СТАРТ ФОНА) ────────────────────────────
+# ─── LIFECYCLE ───────────────────────────────────────────────────
 async def post_init(app: Application):
-    asyncio.create_task(update_symbols_loop())
-    asyncio.create_task(listen_liquidations(app))
+    background_tasks.append(asyncio.create_task(update_symbols_loop()))
+    background_tasks.append(asyncio.create_task(listen_liquidations(app)))
+
+
+async def post_shutdown(app: Application):
+    for task in background_tasks:
+        task.cancel()
+
+    await asyncio.gather(*background_tasks, return_exceptions=True)
+    print("[INFO] Background tasks stopped")
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────
@@ -176,6 +188,7 @@ def main():
         Application.builder()
         .token(BOT_TOKEN)
         .post_init(post_init)
+        .post_shutdown(post_shutdown)
         .build()
     )
 
