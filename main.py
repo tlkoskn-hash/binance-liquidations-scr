@@ -15,10 +15,10 @@ from telegram.ext import (
 from config import BOT_TOKEN, CHAT_ID, EXCLUDED_SYMBOLS
 
 # ─── BINANCE ─────────────────────────────────────────────────────
-BINANCE_WS = "wss://fstream.binance.com/ws/!forceOrder@arr"
+BINANCE_WS = "wss://fstream.binance.com/stream"
 SYMBOLS_UPDATE_INTERVAL = 3600  # 1 час
 
-# ─── НАСТРОЙКИ (МЕНЯЮТСЯ КНОПКАМИ) ────────────────────────────────
+# ─── НАСТРОЙКИ ───────────────────────────────────────────────────
 MIN_LIQUIDATION_USD = 1000
 BOT_ENABLED = True
 # ─────────────────────────────────────────────────────────────────
@@ -26,7 +26,6 @@ BOT_ENABLED = True
 symbols = set()
 daily_counter = {}
 current_date = datetime.date.today()
-
 background_tasks = []
 
 
@@ -48,16 +47,12 @@ def get_top_100_symbols():
 async def update_symbols_loop():
     try:
         while True:
-            try:
-                symbols.clear()
-                symbols.update(get_top_100_symbols())
-                print(f"[INFO] Symbols updated: {len(symbols)}")
-            except Exception as e:
-                print("[ERROR] Symbols update failed:", e)
-
+            symbols.clear()
+            symbols.update(get_top_100_symbols())
+            print(f"[INFO] Symbols updated: {len(symbols)}")
             await asyncio.sleep(SYMBOLS_UPDATE_INTERVAL)
     except asyncio.CancelledError:
-        print("[INFO] update_symbols_loop cancelled")
+        print("[INFO] update_symbols_loop stopped")
 
 
 # ─── TELEGRAM UI ─────────────────────────────────────────────────
@@ -94,7 +89,7 @@ async def start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "inc":
         MIN_LIQUIDATION_USD += 10000
     elif query.data == "dec":
-        MIN_LIQUIDATION_USD = max(10000, MIN_LIQUIDATION_USD - 10000)
+        MIN_LIQUIDATION_USD = max(1000, MIN_LIQUIDATION_USD - 10000)
     elif query.data == "toggle":
         BOT_ENABLED = not BOT_ENABLED
 
@@ -118,30 +113,45 @@ async def send_signal(symbol, side, volume, bot):
 
     daily_counter[symbol] = daily_counter.get(symbol, 0) + 1
 
+    # 🔴 SHORT ликвидирован | 🟢 LONG ликвидирован
     emoji = "🔴" if side == "BUY" else "🟢"
     msg = f"{emoji} {symbol} {volume:,.0f}$ 🔔{daily_counter[symbol]}"
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
 
 
+# ─── WEBSOCKET ───────────────────────────────────────────────────
 async def listen_liquidations(app: Application):
     try:
         while True:
             try:
-                async with websockets.connect(BINANCE_WS) as ws:
+                async with websockets.connect(BINANCE_WS, ping_interval=20) as ws:
+                    print("[INFO] WS connected")
+
+                    # ЯВНАЯ ПОДПИСКА
+                    await ws.send(json.dumps({
+                        "method": "SUBSCRIBE",
+                        "params": ["!forceOrder@arr"],
+                        "id": 1
+                    }))
+                    print("[INFO] forceOrder subscribed")
+
                     async for msg in ws:
+                        data = json.loads(msg)
+
+                        # диагностические сообщения
+                        if isinstance(data, dict) and "result" in data:
+                            continue
+
                         if not BOT_ENABLED:
                             continue
 
-                        data = json.loads(msg)
-                        print"[DEBUG] WS message received")
-                        if not isinstance(data, list):
+                        # stream API кладёт массив в data["data"]
+                        payload = data.get("data")
+                        if not isinstance(payload, list):
                             continue
 
-                        for event in data:
-                            if not isinstance(event, dict):
-                                continue
-
+                        for event in payload:
                             o = event.get("o")
                             if not isinstance(o, dict):
                                 continue
@@ -163,10 +173,11 @@ async def listen_liquidations(app: Application):
                             await send_signal(symbol, o.get("S"), volume, app.bot)
 
             except Exception as e:
-                print("[ERROR] WebSocket:", e)
+                print("[ERROR] WS error:", e)
                 await asyncio.sleep(5)
+
     except asyncio.CancelledError:
-        print("[INFO] listen_liquidations cancelled")
+        print("[INFO] listen_liquidations stopped")
 
 
 # ─── LIFECYCLE ───────────────────────────────────────────────────
@@ -178,7 +189,6 @@ async def post_init(app: Application):
 async def post_shutdown(app: Application):
     for task in background_tasks:
         task.cancel()
-
     await asyncio.gather(*background_tasks, return_exceptions=True)
     print("[INFO] Background tasks stopped")
 
@@ -201,5 +211,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
