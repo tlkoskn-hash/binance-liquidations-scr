@@ -29,6 +29,7 @@ SYMBOL_REFRESH_SEC = 1800
 
 bot_enabled = True
 min_liq_usd = 20_000
+skip_top = 30  # значение по умолчанию
 
 symbols = set()
 tasks = {}
@@ -46,34 +47,53 @@ def keyboard():
         [
             InlineKeyboardButton("➖ 5k", callback_data="dec"),
             InlineKeyboardButton("➕ 5k", callback_data="inc"),
+        ],
+        [
+            InlineKeyboardButton("–20 топ", callback_data="skip20"),
+            InlineKeyboardButton("–50 топ", callback_data="skip50"),
         ]
     ])
 
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+def status_text():
+    return (
         f"⚙️ *Ликвидации Binance Futures*\n\n"
         f"Статус: *{'ВКЛЮЧЕН' if bot_enabled else 'ВЫКЛЮЧЕН'}*\n"
-        f"Мин. сумма: *{min_liq_usd:,}$*",
+        f"Мин. сумма: *{min_liq_usd:,}$*\n"
+        f"Исключаем топ: *{skip_top}*"
+    )
+
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        status_text(),
         parse_mode="Markdown",
         reply_markup=keyboard()
     )
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global bot_enabled, min_liq_usd
+    global bot_enabled, min_liq_usd, skip_top
+
     q = update.callback_query
     await q.answer()
 
     if q.data == "toggle":
         bot_enabled = not bot_enabled
+
     elif q.data == "inc":
         min_liq_usd += 5000
+
     elif q.data == "dec":
         min_liq_usd = max(1000, min_liq_usd - 5000)
 
+    elif q.data == "skip20":
+        skip_top = 20
+        symbols.clear()  # принудительный рескан
+
+    elif q.data == "skip50":
+        skip_top = 50
+        symbols.clear()
+
     await q.edit_message_text(
-        f"⚙️ *Ликвидации Binance Futures*\n\n"
-        f"Статус: *{'ВКЛЮЧЕН' if bot_enabled else 'ВЫКЛЮЧЕН'}*\n"
-        f"Мин. сумма: *{min_liq_usd:,}$*",
+        status_text(),
         parse_mode="Markdown",
         reply_markup=keyboard()
     )
@@ -91,11 +111,13 @@ async def fetch_top_100():
     pairs = [
         x for x in data
         if x.get("symbol", "").endswith("USDT")
-        and x["symbol"] not in ("BTCUSDT", "ETHUSDT")
     ]
 
     pairs.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
-    return {x["symbol"].lower() for x in pairs[:TOP_LIMIT]}
+
+    filtered = pairs[skip_top:skip_top + TOP_LIMIT]
+
+    return {x["symbol"].lower() for x in filtered}
 
 # ================= FORCE ORDER =================
 
@@ -160,15 +182,17 @@ async def symbol_manager(app: Application):
     while True:
         new_symbols = await fetch_top_100()
 
+        # запуск новых
         for s in new_symbols - symbols:
             tasks[s] = asyncio.create_task(listen_symbol(app, s))
 
+        # остановка лишних
         for s in symbols - new_symbols:
             tasks[s].cancel()
             del tasks[s]
 
         symbols = new_symbols
-        print(f"[INFO] active symbols: {len(symbols)}")
+        print(f"[INFO] active symbols: {len(symbols)} | skip_top={skip_top}")
 
         await asyncio.sleep(SYMBOL_REFRESH_SEC)
 
@@ -194,4 +218,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
