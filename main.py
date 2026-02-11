@@ -17,6 +17,7 @@ from telegram.ext import (
 )
 from telegram.error import BadRequest
 
+
 # ================= НАСТРОЙКИ =================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -27,11 +28,11 @@ BINANCE_WS = "wss://fstream.binance.com/ws"
 COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
 TOP_LIMIT = 100
-SYMBOL_REFRESH_SEC = 1800  # 30 мин
+SYMBOL_REFRESH_SEC = 1800  # 30 минут
 
 bot_enabled = True
 min_liq_usd = 20_000
-marketcap_filter = 20  # по умолчанию -20
+marketcap_filter = 20  # по умолчанию исключаем топ-20
 
 symbols = set()
 tasks = {}
@@ -39,7 +40,6 @@ tasks = {}
 top50_marketcap = []
 dynamic_blacklist = set()
 
-log_lock = asyncio.Lock()
 
 # ================= TELEGRAM UI =================
 
@@ -61,6 +61,7 @@ def keyboard():
         ]
     ])
 
+
 def status_text():
     return (
         f"⚙️ *Ликвидации Binance Futures*\n\n"
@@ -69,6 +70,7 @@ def status_text():
         f"Исключаем по капитализации: *топ {marketcap_filter}*"
     )
 
+
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         status_text(),
@@ -76,7 +78,8 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboard()
     )
 
-# ================= MARKETCAP LOAD =================
+
+# ================= MARKETCAP =================
 
 async def load_top50_marketcap():
     global top50_marketcap
@@ -93,46 +96,28 @@ async def load_top50_marketcap():
             async with session.get(COINGECKO_URL, params=params) as r:
                 data = await r.json()
 
-        if not data or not isinstance(data, list):
-            async with log_lock:
-                print("\n[ERROR] CoinGecko returned empty data\n")
-            return
-
         top50_marketcap = [
             f"{coin['symbol'].upper()}USDT"
             for coin in data
         ]
 
-        async with log_lock:
-            print("\n==============================")
-            print("TOP 50 BY MARKETCAP LOADED")
-            print(f"Total loaded: {len(top50_marketcap)}")
-            print("==============================\n")
+    except Exception:
+        top50_marketcap = []
 
-    except Exception as e:
-        async with log_lock:
-            print("[MARKETCAP LOAD ERROR]", e)
 
-async def rebuild_blacklist():
+def rebuild_blacklist():
     global dynamic_blacklist
-
-    if not top50_marketcap:
-        async with log_lock:
-            print("\n[ERROR] Marketcap list is EMPTY. Blacklist not rebuilt.\n")
-        return
 
     dynamic_blacklist = set(top50_marketcap[:marketcap_filter])
 
-    async with log_lock:
-        print("\n==============================")
-        print(f"NEW MARKETCAP FILTER: TOP {marketcap_filter}")
-        print(f"Total excluded: {len(dynamic_blacklist)}")
-        print("Excluded pairs:")
+    print("\n==============================")
+    print(f"NEW MARKETCAP FILTER: TOP {marketcap_filter}")
+    print(f"Total excluded: {len(dynamic_blacklist)}")
+    print("Excluded pairs:")
+    for s in sorted(dynamic_blacklist):
+        print(f"  {s}")
+    print("==============================\n")
 
-        for s in sorted(dynamic_blacklist):
-            print(" ", s)
-
-        print("==============================\n")
 
 # ================= BUTTONS =================
 
@@ -153,12 +138,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif q.data == "cap20":
         marketcap_filter = 20
-        await rebuild_blacklist()
+        rebuild_blacklist()
         symbols.clear()
 
     elif q.data == "cap50":
         marketcap_filter = 50
-        await rebuild_blacklist()
+        rebuild_blacklist()
         symbols.clear()
 
     try:
@@ -170,6 +155,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except BadRequest as e:
         if "Message is not modified" not in str(e):
             raise
+
 
 # ================= TOP 100 ПО ОБЪЕМУ =================
 
@@ -191,19 +177,19 @@ async def fetch_top_100():
 
     return {x["symbol"].lower() for x in pairs[:TOP_LIMIT]}
 
+
 # ================= FORCE ORDER =================
 
 def coinglass_url(symbol: str):
     return f"https://www.coinglass.com/tv/Binance_{symbol.upper()}"
 
+
 async def listen_symbol(app: Application, symbol: str):
     url = f"{BINANCE_WS}/{symbol}@forceOrder"
-    ws = None
 
-    try:
-        while True:
-            try:
-                ws = await websockets.connect(url, ping_interval=20)
+    while True:
+        try:
+            async with websockets.connect(url, ping_interval=20) as ws:
 
                 async for msg in ws:
                     if not bot_enabled:
@@ -232,19 +218,11 @@ async def listen_symbol(app: Application, symbol: str):
                         disable_web_page_preview=True
                     )
 
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                async with log_lock:
-                    print(f"[WS ERROR] {symbol}: {e}")
-                await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            await asyncio.sleep(5)
 
-    finally:
-        if ws and not ws.closed:
-            try:
-                await ws.close()
-            except Exception:
-                pass
 
 # ================= SYMBOL MANAGER =================
 
@@ -263,17 +241,16 @@ async def symbol_manager(app: Application):
 
         symbols = new_symbols
 
-        async with log_lock:
-            print(f"[INFO] active symbols: {len(symbols)} | cap_filter={marketcap_filter}")
-
         await asyncio.sleep(SYMBOL_REFRESH_SEC)
+
 
 # ================= POST INIT =================
 
 async def post_init(app: Application):
     await load_top50_marketcap()
-    await rebuild_blacklist()
+    rebuild_blacklist()
     asyncio.create_task(symbol_manager(app))
+
 
 # ================= MAIN =================
 
@@ -289,6 +266,7 @@ def main():
     app.add_handler(CallbackQueryHandler(buttons))
 
     app.run_polling(close_loop=False)
+
 
 if __name__ == "__main__":
     main()
