@@ -15,6 +15,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
 )
+from telegram.error import BadRequest
 
 # ================= НАСТРОЙКИ =================
 
@@ -29,7 +30,7 @@ SYMBOL_REFRESH_SEC = 1800
 
 bot_enabled = True
 min_liq_usd = 20_000
-skip_top = 30  # значение по умолчанию
+skip_top = 20  # ← по умолчанию -20 топ
 
 symbols = set()
 tasks = {}
@@ -86,17 +87,21 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif q.data == "skip20":
         skip_top = 20
-        symbols.clear()  # принудительный рескан
+        symbols.clear()
 
     elif q.data == "skip50":
         skip_top = 50
         symbols.clear()
 
-    await q.edit_message_text(
-        status_text(),
-        parse_mode="Markdown",
-        reply_markup=keyboard()
-    )
+    try:
+        await q.edit_message_text(
+            status_text(),
+            parse_mode="Markdown",
+            reply_markup=keyboard()
+        )
+    except BadRequest as e:
+        if "Message is not modified" not in str(e):
+            raise
 
 # ================= TOP 100 =================
 
@@ -182,11 +187,9 @@ async def symbol_manager(app: Application):
     while True:
         new_symbols = await fetch_top_100()
 
-        # запуск новых
         for s in new_symbols - symbols:
             tasks[s] = asyncio.create_task(listen_symbol(app, s))
 
-        # остановка лишних
         for s in symbols - new_symbols:
             tasks[s].cancel()
             del tasks[s]
