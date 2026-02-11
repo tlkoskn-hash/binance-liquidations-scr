@@ -28,18 +28,27 @@ BINANCE_WS = "wss://fstream.binance.com/ws"
 COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
 TOP_LIMIT = 100
-SYMBOL_REFRESH_SEC = 1800  # 30 минут
+SYMBOL_REFRESH_SEC = 1800
 MARKETCAP_REFRESH_SEC = 7 * 24 * 60 * 60  # 7 дней
 
 bot_enabled = True
 min_liq_usd = 20_000
-marketcap_filter = 20  # по умолчанию исключаем топ-20
+marketcap_filter = 20  # по умолчанию
 
 symbols = set()
 tasks = {}
 
 top50_marketcap = []
 dynamic_blacklist = set()
+
+log_lock = asyncio.Lock()
+
+
+# ================= ЧИСТЫЙ ЛОГ =================
+
+async def log_block(lines: list):
+    async with log_lock:
+        print("\n".join(lines), flush=True)
 
 
 # ================= TELEGRAM UI =================
@@ -85,68 +94,59 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def load_top50_marketcap():
     global top50_marketcap
 
-    try:
-        params = {
-            "vs_currency": "usd",
-            "order": "market_cap_desc",
-            "per_page": 50,
-            "page": 1,
-        }
+    params = {
+        "vs_currency": "usd",
+        "order": "market_cap_desc",
+        "per_page": 50,
+        "page": 1,
+    }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(COINGECKO_URL, params=params) as r:
-                data = await r.json()
+    async with aiohttp.ClientSession() as session:
+        async with session.get(COINGECKO_URL, params=params) as r:
+            data = await r.json()
 
-        if not isinstance(data, list):
-            print("[MARKETCAP ERROR] Unexpected response")
-            return
-
+    if isinstance(data, list):
         top50_marketcap = [
             f"{coin['symbol'].upper()}USDT"
             for coin in data
             if isinstance(coin, dict) and "symbol" in coin
         ]
 
-        print("[INFO] Top 50 marketcap loaded")
+        await log_block([
+            "[INFO] Top 50 marketcap loaded"
+        ])
 
-    except Exception as e:
-        print("[MARKETCAP LOAD ERROR]", e)
 
-
-def rebuild_blacklist():
+async def rebuild_blacklist():
     global dynamic_blacklist
-
-    if not top50_marketcap:
-        print("\n[WARNING] Marketcap list is empty!\n")
-        return
 
     dynamic_blacklist = set(top50_marketcap[:marketcap_filter])
 
     block = []
-    block.append("")
-    block.append("======================================")
+    block.append("================================")
     block.append(f"NEW MARKETCAP FILTER: TOP {marketcap_filter}")
     block.append(f"Total excluded: {len(dynamic_blacklist)}")
     block.append("Excluded pairs:")
 
-    for s in top50_marketcap[:marketcap_filter]:
+    for s in sorted(dynamic_blacklist):
         block.append(f"  {s}")
 
-    block.append("======================================")
-    block.append("")
+    block.append("================================")
 
-    print("\n".join(block))
-
+    await log_block(block)
 
 
 async def marketcap_updater():
     while True:
         await asyncio.sleep(MARKETCAP_REFRESH_SEC)
 
-        print("\n[INFO] Weekly marketcap update...\n")
+        await log_block([
+            "",
+            "[INFO] Weekly marketcap update",
+        ])
 
         await load_top50_marketcap()
-        rebuild_blacklist()
+        await rebuild_blacklist()
 
 
 # ================= BUTTONS =================
@@ -156,6 +156,8 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     q = update.callback_query
     await q.answer()
+
+    changed = False
 
     if q.data == "toggle":
         bot_enabled = not bot_enabled
@@ -168,13 +170,15 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif q.data == "cap20":
         marketcap_filter = 20
-        rebuild_blacklist()
-        symbols.clear()
+        changed = True
 
     elif q.data == "cap50":
         marketcap_filter = 50
-        rebuild_blacklist()
+        changed = True
+
+    if changed:
         symbols.clear()
+        await rebuild_blacklist()
 
     try:
         await q.edit_message_text(
@@ -187,7 +191,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             raise
 
 
-# ================= TOP 100 ПО ОБЪЕМУ =================
+# ================= TOP 100 =================
 
 async def fetch_top_100():
     async with aiohttp.ClientSession() as session:
@@ -270,20 +274,20 @@ async def symbol_manager(app: Application):
             del tasks[s]
 
         symbols = new_symbols
-
         await asyncio.sleep(SYMBOL_REFRESH_SEC)
 
 
 # ================= POST INIT =================
 
 async def post_init(app: Application):
-
-    print("\n======================================")
-    print("🚀 BOT STARTED")
-    print("======================================\n")
+    await log_block([
+        "================================",
+        "🚀 BOT STARTED",
+        "================================",
+    ])
 
     await load_top50_marketcap()
-    rebuild_blacklist()
+    await rebuild_blacklist()
 
     asyncio.create_task(symbol_manager(app))
     asyncio.create_task(marketcap_updater())
@@ -307,4 +311,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
