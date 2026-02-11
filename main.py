@@ -27,7 +27,7 @@ BINANCE_REST = "https://fapi.binance.com"
 BINANCE_WS = "wss://fstream.binance.com/ws"
 COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
-TOP_LIMIT = 100
+TOP_LIMIT = 200
 SYMBOL_REFRESH_SEC = 1800
 MARKETCAP_REFRESH_SEC = 7 * 24 * 60 * 60  # 7 дней
 
@@ -307,3 +307,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
