@@ -97,16 +97,22 @@ async def load_top50_marketcap():
             async with session.get(COINGECKO_URL, params=params) as r:
                 data = await r.json()
 
+        # Проверяем что получили список
+        if not isinstance(data, list):
+            print("[MARKETCAP ERROR] Unexpected response:", data)
+            return
+
         top50_marketcap = [
             f"{coin['symbol'].upper()}USDT"
             for coin in data
+            if isinstance(coin, dict) and "symbol" in coin
         ]
 
-        print("[INFO] Top 50 marketcap loaded")
+        print("[INFO] Top 50 marketcap loaded successfully")
 
     except Exception as e:
         print("[MARKETCAP LOAD ERROR]", e)
-        top50_marketcap = []
+
 
 
 def rebuild_blacklist():
@@ -288,3 +294,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
