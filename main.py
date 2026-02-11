@@ -29,6 +29,7 @@ COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
 TOP_LIMIT = 100
 SYMBOL_REFRESH_SEC = 1800  # 30 минут
+MARKETCAP_REFRESH_SEC = 7 * 24 * 60 * 60  # 7 дней
 
 bot_enabled = True
 min_liq_usd = 20_000
@@ -101,7 +102,10 @@ async def load_top50_marketcap():
             for coin in data
         ]
 
-    except Exception:
+        print("[INFO] Top 50 marketcap loaded")
+
+    except Exception as e:
+        print("[MARKETCAP LOAD ERROR]", e)
         top50_marketcap = []
 
 
@@ -117,6 +121,14 @@ def rebuild_blacklist():
     for s in sorted(dynamic_blacklist):
         print(f"  {s}")
     print("==============================\n")
+
+
+async def marketcap_updater():
+    while True:
+        await asyncio.sleep(MARKETCAP_REFRESH_SEC)
+        print("\n[INFO] Weekly marketcap update...")
+        await load_top50_marketcap()
+        rebuild_blacklist()
 
 
 # ================= BUTTONS =================
@@ -190,8 +202,8 @@ async def listen_symbol(app: Application, symbol: str):
     while True:
         try:
             async with websockets.connect(url, ping_interval=20) as ws:
-
                 async for msg in ws:
+
                     if not bot_enabled:
                         continue
 
@@ -247,9 +259,15 @@ async def symbol_manager(app: Application):
 # ================= POST INIT =================
 
 async def post_init(app: Application):
+    print("\n==============================")
+    print("🚀 BOT STARTED")
+    print("==============================\n")
+
     await load_top50_marketcap()
     rebuild_blacklist()
+
     asyncio.create_task(symbol_manager(app))
+    asyncio.create_task(marketcap_updater())
 
 
 # ================= MAIN =================
