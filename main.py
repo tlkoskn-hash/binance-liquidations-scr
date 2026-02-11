@@ -97,9 +97,8 @@ async def load_top50_marketcap():
             async with session.get(COINGECKO_URL, params=params) as r:
                 data = await r.json()
 
-        # Проверяем что получили список
         if not isinstance(data, list):
-            print("[MARKETCAP ERROR] Unexpected response:", data)
+            print("[MARKETCAP ERROR] Unexpected response")
             return
 
         top50_marketcap = [
@@ -108,11 +107,10 @@ async def load_top50_marketcap():
             if isinstance(coin, dict) and "symbol" in coin
         ]
 
-        print("[INFO] Top 50 marketcap loaded successfully")
+        print("[INFO] Top 50 marketcap loaded")
 
     except Exception as e:
         print("[MARKETCAP LOAD ERROR]", e)
-
 
 
 def rebuild_blacklist():
@@ -120,19 +118,28 @@ def rebuild_blacklist():
 
     dynamic_blacklist = set(top50_marketcap[:marketcap_filter])
 
-    print("\n==============================")
-    print(f"NEW MARKETCAP FILTER: TOP {marketcap_filter}")
-    print(f"Total excluded: {len(dynamic_blacklist)}")
-    print("Excluded pairs:")
+    block = []
+    block.append("")
+    block.append("======================================")
+    block.append(f"NEW MARKETCAP FILTER: TOP {marketcap_filter}")
+    block.append(f"Total excluded: {len(dynamic_blacklist)}")
+    block.append("Excluded pairs:")
+
     for s in sorted(dynamic_blacklist):
-        print(f"  {s}")
-    print("==============================\n")
+        block.append(f"  {s}")
+
+    block.append("======================================")
+    block.append("")
+
+    print("\n".join(block))
 
 
 async def marketcap_updater():
     while True:
         await asyncio.sleep(MARKETCAP_REFRESH_SEC)
-        print("\n[INFO] Weekly marketcap update...")
+
+        print("\n[INFO] Weekly marketcap update...\n")
+
         await load_top50_marketcap()
         rebuild_blacklist()
 
@@ -265,9 +272,10 @@ async def symbol_manager(app: Application):
 # ================= POST INIT =================
 
 async def post_init(app: Application):
-    print("\n==============================")
+
+    print("\n======================================")
     print("🚀 BOT STARTED")
-    print("==============================\n")
+    print("======================================\n")
 
     await load_top50_marketcap()
     rebuild_blacklist()
@@ -294,4 +302,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
