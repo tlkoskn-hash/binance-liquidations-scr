@@ -110,15 +110,22 @@ async def load_top50_marketcap():
 
 def rebuild_blacklist():
     global dynamic_blacklist
+
     dynamic_blacklist = set(top50_marketcap[:marketcap_filter])
 
-    print("\n==============================")
-    print(f"NEW MARKETCAP FILTER: TOP {marketcap_filter}")
-    print(f"Total excluded: {len(dynamic_blacklist)}")
-    print("Excluded pairs:")
-    for s in dynamic_blacklist:
-        print("-", s)
-    print("==============================\n")
+    log_block = []
+    log_block.append("\n==============================")
+    log_block.append(f"NEW MARKETCAP FILTER: TOP {marketcap_filter}")
+    log_block.append(f"Total excluded: {len(dynamic_blacklist)}")
+    log_block.append("Excluded pairs:")
+
+    for s in sorted(dynamic_blacklist):
+        log_block.append(f"  {s}")
+
+    log_block.append("==============================\n")
+
+    print("\n".join(log_block))
+
 
 # ================= BUTTONS =================
 
@@ -276,3 +283,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
