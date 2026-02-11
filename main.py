@@ -25,15 +25,19 @@ CHAT_ID = os.getenv("CHAT_ID")
 BINANCE_REST = "https://fapi.binance.com"
 BINANCE_WS = "wss://fstream.binance.com/ws"
 
+COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
+
 TOP_LIMIT = 100
 SYMBOL_REFRESH_SEC = 1800
+BLACKLIST_REFRESH_SEC = 86400  # 24 часа
 
 bot_enabled = True
 min_liq_usd = 20_000
-skip_top = 20  # ← по умолчанию -20 топ
+marketcap_filter = 20  # по умолчанию исключаем топ-20 по капитализации
 
 symbols = set()
 tasks = {}
+dynamic_blacklist = set()
 
 # ================= TELEGRAM UI =================
 
@@ -50,8 +54,8 @@ def keyboard():
             InlineKeyboardButton("➕ 5k", callback_data="inc"),
         ],
         [
-            InlineKeyboardButton("–20 топ", callback_data="skip20"),
-            InlineKeyboardButton("–50 топ", callback_data="skip50"),
+            InlineKeyboardButton("–20 кап", callback_data="cap20"),
+            InlineKeyboardButton("–50 кап", callback_data="cap50"),
         ]
     ])
 
@@ -60,7 +64,7 @@ def status_text():
         f"⚙️ *Ликвидации Binance Futures*\n\n"
         f"Статус: *{'ВКЛЮЧЕН' if bot_enabled else 'ВЫКЛЮЧЕН'}*\n"
         f"Мин. сумма: *{min_liq_usd:,}$*\n"
-        f"Исключаем топ: *{skip_top}*"
+        f"Исключаем по капитализации: *топ {marketcap_filter}*"
     )
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -71,7 +75,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global bot_enabled, min_liq_usd, skip_top
+    global bot_enabled, min_liq_usd, marketcap_filter, symbols
 
     q = update.callback_query
     await q.answer()
@@ -85,12 +89,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif q.data == "dec":
         min_liq_usd = max(1000, min_liq_usd - 5000)
 
-    elif q.data == "skip20":
-        skip_top = 20
+    elif q.data == "cap20":
+        marketcap_filter = 20
         symbols.clear()
 
-    elif q.data == "skip50":
-        skip_top = 50
+    elif q.data == "cap50":
+        marketcap_filter = 50
         symbols.clear()
 
     try:
@@ -103,7 +107,39 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if "Message is not modified" not in str(e):
             raise
 
-# ================= TOP 100 =================
+# ================= BLACKLIST ПО КАПИТАЛИЗАЦИИ =================
+
+async def update_blacklist():
+    global dynamic_blacklist
+
+    while True:
+        try:
+            params = {
+                "vs_currency": "usd",
+                "order": "market_cap_desc",
+                "per_page": marketcap_filter,
+                "page": 1,
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(COINGECKO_URL, params=params) as r:
+                    data = await r.json()
+
+            new_blacklist = set()
+
+            for coin in data:
+                symbol = coin["symbol"].upper()
+                new_blacklist.add(f"{symbol}USDT")
+
+            dynamic_blacklist = new_blacklist
+            print(f"[INFO] Blacklist updated: {len(dynamic_blacklist)} coins")
+
+        except Exception as e:
+            print("[BLACKLIST ERROR]", e)
+
+        await asyncio.sleep(BLACKLIST_REFRESH_SEC)
+
+# ================= TOP 100 ПО ОБЪЕМУ =================
 
 async def fetch_top_100():
     async with aiohttp.ClientSession() as session:
@@ -116,13 +152,12 @@ async def fetch_top_100():
     pairs = [
         x for x in data
         if x.get("symbol", "").endswith("USDT")
+        and x["symbol"] not in dynamic_blacklist
     ]
 
     pairs.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
 
-    filtered = pairs[skip_top:skip_top + TOP_LIMIT]
-
-    return {x["symbol"].lower() for x in filtered}
+    return {x["symbol"].lower() for x in pairs[:TOP_LIMIT]}
 
 # ================= FORCE ORDER =================
 
@@ -195,13 +230,14 @@ async def symbol_manager(app: Application):
             del tasks[s]
 
         symbols = new_symbols
-        print(f"[INFO] active symbols: {len(symbols)} | skip_top={skip_top}")
+        print(f"[INFO] active symbols: {len(symbols)} | cap_filter={marketcap_filter}")
 
         await asyncio.sleep(SYMBOL_REFRESH_SEC)
 
 # ================= POST INIT =================
 
 async def post_init(app: Application):
+    asyncio.create_task(update_blacklist())
     asyncio.create_task(symbol_manager(app))
 
 # ================= MAIN =================
