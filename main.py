@@ -27,7 +27,7 @@ BINANCE_REST = "https://fapi.binance.com"
 BINANCE_WS = "wss://fstream.binance.com/ws"
 COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
-TOP_LIMIT = 200
+TOP_LIMIT = 100
 SYMBOL_REFRESH_SEC = 1800
 MARKETCAP_REFRESH_SEC = 7 * 24 * 60 * 60  # 7 дней
 
@@ -256,6 +256,7 @@ async def listen_symbol(app: Application, symbol: str):
 
 
 # ================= SYMBOL MANAGER =================
+# ================= SYMBOL MANAGER =================
 
 async def symbol_manager(app: Application):
     global symbols, tasks
@@ -263,9 +264,21 @@ async def symbol_manager(app: Application):
     while True:
         new_symbols = await fetch_top_100()
 
+        # ===== ЛОГ ТОП-100 =====
+        sorted_list = sorted(new_symbols)
+
+        print("\n==============================")
+        print("TOP 100 BY 24H VOLUME (USDT)")
+        print(f"Total: {len(sorted_list)}")
+        for s in sorted_list:
+            print(s.upper())
+        print("==============================\n")
+
+        # ===== Запуск новых =====
         for s in new_symbols - symbols:
             tasks[s] = asyncio.create_task(listen_symbol(app, s))
 
+        # ===== Остановка лишних =====
         for s in symbols - new_symbols:
             tasks[s].cancel()
             del tasks[s]
@@ -307,4 +320,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
