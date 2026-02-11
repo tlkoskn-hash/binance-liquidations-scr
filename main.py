@@ -116,6 +116,10 @@ async def load_top50_marketcap():
 def rebuild_blacklist():
     global dynamic_blacklist
 
+    if not top50_marketcap:
+        print("\n[WARNING] Marketcap list is empty!\n")
+        return
+
     dynamic_blacklist = set(top50_marketcap[:marketcap_filter])
 
     block = []
@@ -125,13 +129,14 @@ def rebuild_blacklist():
     block.append(f"Total excluded: {len(dynamic_blacklist)}")
     block.append("Excluded pairs:")
 
-    for s in sorted(dynamic_blacklist):
+    for s in top50_marketcap[:marketcap_filter]:
         block.append(f"  {s}")
 
     block.append("======================================")
     block.append("")
 
     print("\n".join(block))
+
 
 
 async def marketcap_updater():
@@ -302,3 +307,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
