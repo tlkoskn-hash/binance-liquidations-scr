@@ -24,11 +24,10 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 BINANCE_REST = "https://fapi.binance.com"
 BINANCE_WS = "wss://fstream.binance.com/ws"
-
 COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
 TOP_LIMIT = 100
-SYMBOL_REFRESH_SEC = 1800  # 30 минут
+SYMBOL_REFRESH_SEC = 1800  # 30 мин
 
 bot_enabled = True
 min_liq_usd = 20_000
@@ -37,11 +36,9 @@ marketcap_filter = 20  # по умолчанию -20
 symbols = set()
 tasks = {}
 
-# всегда загружаем TOP 50 по капитализации
 top50_marketcap = []
 dynamic_blacklist = set()
 
-# для чистого логирования
 log_lock = asyncio.Lock()
 
 # ================= TELEGRAM UI =================
@@ -64,7 +61,6 @@ def keyboard():
         ]
     ])
 
-
 def status_text():
     return (
         f"⚙️ *Ликвидации Binance Futures*\n\n"
@@ -73,7 +69,6 @@ def status_text():
         f"Исключаем по капитализации: *топ {marketcap_filter}*"
     )
 
-
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         status_text(),
@@ -81,7 +76,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboard()
     )
 
-# ================= ЗАГРУЗКА TOP 50 MARKETCAP =================
+# ================= MARKETCAP LOAD =================
 
 async def load_top50_marketcap():
     global top50_marketcap
@@ -98,6 +93,11 @@ async def load_top50_marketcap():
             async with session.get(COINGECKO_URL, params=params) as r:
                 data = await r.json()
 
+        if not data or not isinstance(data, list):
+            async with log_lock:
+                print("\n[ERROR] CoinGecko returned empty data\n")
+            return
+
         top50_marketcap = [
             f"{coin['symbol'].upper()}USDT"
             for coin in data
@@ -106,16 +106,20 @@ async def load_top50_marketcap():
         async with log_lock:
             print("\n==============================")
             print("TOP 50 BY MARKETCAP LOADED")
-            print("Total loaded:", len(top50_marketcap))
+            print(f"Total loaded: {len(top50_marketcap)}")
             print("==============================\n")
 
     except Exception as e:
-        print("[MARKETCAP LOAD ERROR]", e)
-
-# ================= BLACKLIST =================
+        async with log_lock:
+            print("[MARKETCAP LOAD ERROR]", e)
 
 async def rebuild_blacklist():
     global dynamic_blacklist
+
+    if not top50_marketcap:
+        async with log_lock:
+            print("\n[ERROR] Marketcap list is EMPTY. Blacklist not rebuilt.\n")
+        return
 
     dynamic_blacklist = set(top50_marketcap[:marketcap_filter])
 
@@ -192,7 +196,6 @@ async def fetch_top_100():
 def coinglass_url(symbol: str):
     return f"https://www.coinglass.com/tv/Binance_{symbol.upper()}"
 
-
 async def listen_symbol(app: Application, symbol: str):
     url = f"{BINANCE_WS}/{symbol}@forceOrder"
     ws = None
@@ -232,7 +235,8 @@ async def listen_symbol(app: Application, symbol: str):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"[WS ERROR] {symbol}: {e}")
+                async with log_lock:
+                    print(f"[WS ERROR] {symbol}: {e}")
                 await asyncio.sleep(5)
 
     finally:
@@ -242,9 +246,6 @@ async def listen_symbol(app: Application, symbol: str):
             except Exception:
                 pass
 
-        async with log_lock:
-            print(f"[WS] {symbol} stopped cleanly")
-
 # ================= SYMBOL MANAGER =================
 
 async def symbol_manager(app: Application):
@@ -253,11 +254,9 @@ async def symbol_manager(app: Application):
     while True:
         new_symbols = await fetch_top_100()
 
-        # запуск новых
         for s in new_symbols - symbols:
             tasks[s] = asyncio.create_task(listen_symbol(app, s))
 
-        # остановка лишних
         for s in symbols - new_symbols:
             tasks[s].cancel()
             del tasks[s]
