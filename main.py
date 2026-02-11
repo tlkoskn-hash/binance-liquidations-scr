@@ -33,11 +33,13 @@ BLACKLIST_REFRESH_SEC = 86400  # 24 часа
 
 bot_enabled = True
 min_liq_usd = 20_000
-marketcap_filter = 20  # по умолчанию исключаем топ-20 по капитализации
+marketcap_filter = 20  # по умолчанию –20
 
 symbols = set()
 tasks = {}
-dynamic_blacklist = set()
+
+cap_blacklist_full = []      # полный топ-50
+dynamic_blacklist = set()    # активный blacklist
 
 # ================= TELEGRAM UI =================
 
@@ -75,7 +77,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global bot_enabled, min_liq_usd, marketcap_filter, symbols
+    global bot_enabled, min_liq_usd, marketcap_filter, dynamic_blacklist, symbols
 
     q = update.callback_query
     await q.answer()
@@ -91,11 +93,21 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif q.data == "cap20":
         marketcap_filter = 20
-        symbols.clear()
 
     elif q.data == "cap50":
         marketcap_filter = 50
-        symbols.clear()
+
+    # обновляем активный blacklist
+    dynamic_blacklist = set(cap_blacklist_full[:marketcap_filter])
+    symbols.clear()
+
+    print("\n========== FILTER CHANGED ==========")
+    print(f"New cap filter: TOP {marketcap_filter}")
+    print(f"Total excluded: {len(dynamic_blacklist)}")
+    print("Excluded pairs:")
+    for s in sorted(dynamic_blacklist):
+        print(f" - {s}")
+    print("=====================================\n")
 
     try:
         await q.edit_message_text(
@@ -107,17 +119,17 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if "Message is not modified" not in str(e):
             raise
 
-# ================= BLACKLIST ПО КАПИТАЛИЗАЦИИ =================
+# ================= BLACKLIST =================
 
 async def update_blacklist():
-    global dynamic_blacklist
+    global cap_blacklist_full, dynamic_blacklist
 
     while True:
         try:
             params = {
                 "vs_currency": "usd",
                 "order": "market_cap_desc",
-                "per_page": marketcap_filter,
+                "per_page": 50,
                 "page": 1,
             }
 
@@ -125,17 +137,24 @@ async def update_blacklist():
                 async with session.get(COINGECKO_URL, params=params) as r:
                     data = await r.json()
 
-            new_blacklist = set()
+            cap_blacklist_full = [
+                f"{coin['symbol'].upper()}USDT"
+                for coin in data
+            ]
 
-            for coin in data:
-                symbol = coin["symbol"].upper()
-                new_blacklist.add(f"{symbol}USDT")
+            dynamic_blacklist = set(cap_blacklist_full[:marketcap_filter])
 
-            dynamic_blacklist = new_blacklist
-            print(f"[INFO] Blacklist updated: {len(dynamic_blacklist)} coins")
+            print("\n========== MARKET CAP BLACKLIST ==========")
+            print("Full TOP 50 loaded")
+            print(f"Active filter: TOP {marketcap_filter}")
+            print(f"Total excluded: {len(dynamic_blacklist)}")
+            print("Excluded pairs:")
+            for s in sorted(dynamic_blacklist):
+                print(f" - {s}")
+            print("===========================================\n")
 
         except Exception as e:
-            print("[BLACKLIST ERROR]", e)
+            print("[CAP ERROR]", e)
 
         await asyncio.sleep(BLACKLIST_REFRESH_SEC)
 
