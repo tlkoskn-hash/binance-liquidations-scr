@@ -43,6 +43,9 @@ tasks = {}
 top50_marketcap = []
 dynamic_blacklist = set()
 
+# 🔥 анти-дубль
+recent_events = set()
+
 
 # ================= TELEGRAM UI =================
 
@@ -132,7 +135,6 @@ async def weekly_marketcap_update():
     while True:
         await asyncio.sleep(MARKETCAP_REFRESH_SEC)
         await load_top50_marketcap()
-        # блок НЕ выводим повторно
 
 
 # ================= BUTTONS =================
@@ -201,6 +203,8 @@ def coinglass_url(symbol: str):
 
 
 async def listen_symbol(app: Application, symbol: str):
+    global recent_events
+
     url = f"{BINANCE_WS}/{symbol}@forceOrder"
 
     while True:
@@ -218,6 +222,17 @@ async def listen_symbol(app: Application, symbol: str):
                     usd = float(o["p"]) * float(o["q"])
                     if usd < min_liq_usd:
                         continue
+
+                    # 🔥 создаём уникальный ID события
+                    event_id = f"{o['s']}_{o['T']}_{usd}"
+
+                    if event_id in recent_events:
+                        continue
+
+                    recent_events.add(event_id)
+
+                    if len(recent_events) > 1000:
+                        recent_events.clear()
 
                     direction = "Long" if o["S"] == "SELL" else "Short"
                     emoji = "🟢" if direction == "Long" else "🔴"
