@@ -44,7 +44,7 @@ recent_events = set()
 def keyboard():
     return ReplyKeyboardMarkup(
         [
-            ["+5k", "-5k"],
+            ["-5k", "+5k"],
             ["Все", "-20 кап", "-50 кап"],
             ["📊 Статус"],
         ],
@@ -291,6 +291,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
