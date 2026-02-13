@@ -29,12 +29,10 @@ COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
 TOP_LIMIT = 100
 SYMBOL_REFRESH_SEC = 1800
-MARKETCAP_REFRESH_SEC = 7 * 24 * 60 * 60  # 7 дней
+MARKETCAP_REFRESH_SEC = 7 * 24 * 60 * 60
 
-
-bot_enabled = True
 min_liq_usd = 20_000
-marketcap_filter = 20  # по умолчанию TOP 20
+marketcap_filter = 20  # 0 = без фильтра
 
 
 symbols = set()
@@ -43,7 +41,6 @@ tasks = {}
 top50_marketcap = []
 dynamic_blacklist = set()
 
-# 🔥 анти-дубль
 recent_events = set()
 
 
@@ -52,28 +49,30 @@ recent_events = set()
 def keyboard():
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(
-                "⏸ Выкл" if bot_enabled else "▶️ Вкл",
-                callback_data="toggle"
-            )
-        ],
-        [
             InlineKeyboardButton("➖ 5k", callback_data="dec"),
             InlineKeyboardButton("➕ 5k", callback_data="inc"),
         ],
         [
-            InlineKeyboardButton("–20 кап", callback_data="cap20"),
-            InlineKeyboardButton("–50 кап", callback_data="cap50"),
+            InlineKeyboardButton("Все", callback_data="cap0"),
+            InlineKeyboardButton("-20 кап", callback_data="cap20"),
+            InlineKeyboardButton("-50 кап", callback_data="cap50"),
+        ],
+        [
+            InlineKeyboardButton("📊 Статус", callback_data="status"),
         ]
     ])
 
 
 def status_text():
+    if marketcap_filter == 0:
+        cap_text = "Все пары"
+    else:
+        cap_text = f"топ {marketcap_filter}"
+
     return (
         f"⚙️ *Ликвидации Binance Futures*\n\n"
-        f"Статус: *{'ВКЛЮЧЕН' if bot_enabled else 'ВЫКЛЮЧЕН'}*\n"
         f"Мин. сумма: *{min_liq_usd:,}$*\n"
-        f"Исключаем по капитализации: *топ {marketcap_filter}*"
+        f"Исключаем по капитализации: *{cap_text}*"
     )
 
 
@@ -102,10 +101,6 @@ async def load_top50_marketcap():
             async with session.get(COINGECKO_URL, params=params) as r:
                 data = await r.json()
 
-        if not isinstance(data, list):
-            print("[MARKETCAP ERROR] Unexpected response")
-            return
-
         top50_marketcap = [
             f"{coin['symbol'].upper()}USDT"
             for coin in data
@@ -121,13 +116,14 @@ async def load_top50_marketcap():
 async def rebuild_blacklist():
     global dynamic_blacklist
 
-    dynamic_blacklist = set(top50_marketcap[:marketcap_filter])
+    if marketcap_filter == 0:
+        dynamic_blacklist = set()
+    else:
+        dynamic_blacklist = set(top50_marketcap[:marketcap_filter])
 
     print("\n==============================")
-    print(f"MARKETCAP FILTER: TOP {marketcap_filter}")
-    print(f"Total: {len(dynamic_blacklist)}")
-    for s in sorted(dynamic_blacklist):
-        print(s)
+    print(f"MARKETCAP FILTER: {marketcap_filter if marketcap_filter else 'OFF'}")
+    print(f"Total excluded: {len(dynamic_blacklist)}")
     print("==============================\n")
 
 
@@ -140,19 +136,21 @@ async def weekly_marketcap_update():
 # ================= BUTTONS =================
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global bot_enabled, min_liq_usd, marketcap_filter, symbols
+    global min_liq_usd, marketcap_filter, symbols
 
     q = update.callback_query
     await q.answer()
 
-    if q.data == "toggle":
-        bot_enabled = not bot_enabled
-
-    elif q.data == "inc":
+    if q.data == "inc":
         min_liq_usd += 5000
 
     elif q.data == "dec":
         min_liq_usd = max(1000, min_liq_usd - 5000)
+
+    elif q.data == "cap0":
+        marketcap_filter = 0
+        await rebuild_blacklist()
+        symbols.clear()
 
     elif q.data == "cap20":
         marketcap_filter = 20
@@ -163,6 +161,9 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         marketcap_filter = 50
         await rebuild_blacklist()
         symbols.clear()
+
+    elif q.data == "status":
+        pass
 
     try:
         await q.edit_message_text(
@@ -175,15 +176,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             raise
 
 
-# ================= TOP 100 ПО ОБЪЕМУ =================
+# ================= TOP 100 =================
 
 async def fetch_top_100():
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{BINANCE_REST}/fapi/v1/ticker/24hr") as r:
             data = await r.json()
-
-    if not isinstance(data, list):
-        return set()
 
     pairs = [
         x for x in data
@@ -212,9 +210,6 @@ async def listen_symbol(app: Application, symbol: str):
             async with websockets.connect(url, ping_interval=20) as ws:
                 async for msg in ws:
 
-                    if not bot_enabled:
-                        continue
-
                     o = json.loads(msg).get("o")
                     if not o:
                         continue
@@ -223,7 +218,6 @@ async def listen_symbol(app: Application, symbol: str):
                     if usd < min_liq_usd:
                         continue
 
-                    # 🔥 создаём уникальный ID события
                     event_id = f"{o['s']}_{o['T']}_{usd}"
 
                     if event_id in recent_events:
@@ -256,7 +250,6 @@ async def listen_symbol(app: Application, symbol: str):
 
 
 # ================= SYMBOL MANAGER =================
-# ================= SYMBOL MANAGER =================
 
 async def symbol_manager(app: Application):
     global symbols, tasks
@@ -264,21 +257,9 @@ async def symbol_manager(app: Application):
     while True:
         new_symbols = await fetch_top_100()
 
-        # ===== ЛОГ ТОП-100 =====
-        sorted_list = sorted(new_symbols)
-
-        print("\n==============================")
-        print("TOP 100 BY 24H VOLUME (USDT)")
-        print(f"Total: {len(sorted_list)}")
-        for s in sorted_list:
-            print(s.upper())
-        print("==============================\n")
-
-        # ===== Запуск новых =====
         for s in new_symbols - symbols:
             tasks[s] = asyncio.create_task(listen_symbol(app, s))
 
-        # ===== Остановка лишних =====
         for s in symbols - new_symbols:
             tasks[s].cancel()
             del tasks[s]
@@ -291,9 +272,7 @@ async def symbol_manager(app: Application):
 # ================= POST INIT =================
 
 async def post_init(app: Application):
-    print("\n==============================")
-    print("🚀 BOT STARTED")
-    print("==============================\n")
+    print("\n🚀 BOT STARTED\n")
 
     await load_top50_marketcap()
     await rebuild_blacklist()
@@ -320,5 +299,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
