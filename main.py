@@ -44,7 +44,7 @@ recent_events = set()
 def keyboard():
     return ReplyKeyboardMarkup(
         [
-            ["➖ 5k", "➕ 5k"],
+            ["-5k", "+5k"],
             ["Все", "-20 кап", "-50 кап"],
             ["📊 Статус"],
         ],
@@ -57,7 +57,7 @@ def status_text():
     if marketcap_filter == 0:
         cap_text = "Все пары"
     else:
-        cap_text = f"топ {marketcap_filter}"
+        cap_text = f"без топ {marketcap_filter}"
 
     return (
         f"⚙️ Ликвидации Binance Futures\n\n"
@@ -289,3 +289,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
