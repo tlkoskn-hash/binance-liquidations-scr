@@ -95,6 +95,8 @@ async def load_top50_marketcap():
             if isinstance(coin, dict) and "symbol" in coin
         ]
 
+        print("[INFO] Top 50 marketcap updated")
+
     except Exception as e:
         print("[MARKETCAP ERROR]", e)
 
@@ -106,6 +108,18 @@ async def rebuild_blacklist():
         dynamic_blacklist = set()
     else:
         dynamic_blacklist = set(top50_marketcap[:marketcap_filter])
+
+    print("\n==============================")
+    print(f"MARKETCAP FILTER: {marketcap_filter if marketcap_filter else 'OFF'}")
+    print(f"Excluded: {len(dynamic_blacklist)}")
+    print("==============================\n")
+
+
+async def weekly_marketcap_update():
+    while True:
+        await asyncio.sleep(MARKETCAP_REFRESH_SEC)
+        await load_top50_marketcap()
+        await rebuild_blacklist()
 
 # ================= TEXT HANDLER =================
 
@@ -222,6 +236,15 @@ async def symbol_manager(app: Application):
     while True:
         new_symbols = await fetch_top_100()
 
+        sorted_list = sorted(new_symbols)
+
+        print("\n==============================")
+        print("TOP 100 BY 24H VOLUME (USDT)")
+        print(f"Total: {len(sorted_list)}")
+        for s in sorted_list:
+            print(s.upper())
+        print("==============================\n")
+
         for s in new_symbols - symbols:
             tasks[s] = asyncio.create_task(listen_symbol(app, s))
 
@@ -236,14 +259,21 @@ async def symbol_manager(app: Application):
 # ================= POST INIT =================
 
 async def post_init(app: Application):
+    print("\n==============================")
+    print("🚀 BOT STARTED")
+    print("==============================\n")
+
     await load_top50_marketcap()
     await rebuild_blacklist()
 
     asyncio.create_task(symbol_manager(app))
+    asyncio.create_task(weekly_marketcap_update())
 
 # ================= MAIN =================
 
 def main():
+    print("=== STARTING LIQUIDATION BOT ===")
+
     app = (
         Application.builder()
         .token(BOT_TOKEN)
