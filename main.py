@@ -6,17 +6,15 @@ import websockets
 
 from telegram import (
     Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
 )
 from telegram.ext import (
     Application,
     CommandHandler,
-    CallbackQueryHandler,
+    MessageHandler,
     ContextTypes,
+    filters,
 )
-from telegram.error import BadRequest
-
 
 # ================= НАСТРОЙКИ =================
 
@@ -34,33 +32,25 @@ MARKETCAP_REFRESH_SEC = 7 * 24 * 60 * 60
 min_liq_usd = 20_000
 marketcap_filter = 20  # 0 = без фильтра
 
-
 symbols = set()
 tasks = {}
 
 top50_marketcap = []
 dynamic_blacklist = set()
-
 recent_events = set()
-
 
 # ================= TELEGRAM UI =================
 
 def keyboard():
-    return InlineKeyboardMarkup([
+    return ReplyKeyboardMarkup(
         [
-            InlineKeyboardButton("➖ 5k", callback_data="dec"),
-            InlineKeyboardButton("➕ 5k", callback_data="inc"),
+            ["➖ 5k", "➕ 5k"],
+            ["Все", "-20 кап", "-50 кап"],
+            ["📊 Статус"],
         ],
-        [
-            InlineKeyboardButton("Все", callback_data="cap0"),
-            InlineKeyboardButton("-20 кап", callback_data="cap20"),
-            InlineKeyboardButton("-50 кап", callback_data="cap50"),
-        ],
-        [
-            InlineKeyboardButton("📊 Статус", callback_data="status"),
-        ]
-    ])
+        resize_keyboard=True,
+        is_persistent=True
+    )
 
 
 def status_text():
@@ -70,19 +60,17 @@ def status_text():
         cap_text = f"топ {marketcap_filter}"
 
     return (
-        f"⚙️ *Ликвидации Binance Futures*\n\n"
-        f"Мин. сумма: *{min_liq_usd:,}$*\n"
-        f"Исключаем по капитализации: *{cap_text}*"
+        f"⚙️ Ликвидации Binance Futures\n\n"
+        f"Мин. сумма: {min_liq_usd:,}$\n"
+        f"Фильтр капитализации: {cap_text}"
     )
 
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         status_text(),
-        parse_mode="Markdown",
         reply_markup=keyboard()
     )
-
 
 # ================= MARKETCAP =================
 
@@ -107,10 +95,8 @@ async def load_top50_marketcap():
             if isinstance(coin, dict) and "symbol" in coin
         ]
 
-        print("[INFO] Top 50 marketcap updated")
-
     except Exception as e:
-        print("[MARKETCAP LOAD ERROR]", e)
+        print("[MARKETCAP ERROR]", e)
 
 
 async def rebuild_blacklist():
@@ -121,60 +107,41 @@ async def rebuild_blacklist():
     else:
         dynamic_blacklist = set(top50_marketcap[:marketcap_filter])
 
-    print("\n==============================")
-    print(f"MARKETCAP FILTER: {marketcap_filter if marketcap_filter else 'OFF'}")
-    print(f"Total excluded: {len(dynamic_blacklist)}")
-    print("==============================\n")
+# ================= TEXT HANDLER =================
 
-
-async def weekly_marketcap_update():
-    while True:
-        await asyncio.sleep(MARKETCAP_REFRESH_SEC)
-        await load_top50_marketcap()
-
-
-# ================= BUTTONS =================
-
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global min_liq_usd, marketcap_filter, symbols
 
-    q = update.callback_query
-    await q.answer()
+    text = update.message.text
 
-    if q.data == "inc":
+    if text == "➕ 5k":
         min_liq_usd += 5000
 
-    elif q.data == "dec":
+    elif text == "➖ 5k":
         min_liq_usd = max(1000, min_liq_usd - 5000)
 
-    elif q.data == "cap0":
+    elif text == "Все":
         marketcap_filter = 0
         await rebuild_blacklist()
         symbols.clear()
 
-    elif q.data == "cap20":
+    elif text == "-20 кап":
         marketcap_filter = 20
         await rebuild_blacklist()
         symbols.clear()
 
-    elif q.data == "cap50":
+    elif text == "-50 кап":
         marketcap_filter = 50
         await rebuild_blacklist()
         symbols.clear()
 
-    elif q.data == "status":
+    elif text == "📊 Статус":
         pass
 
-    try:
-        await q.edit_message_text(
-            status_text(),
-            parse_mode="Markdown",
-            reply_markup=keyboard()
-        )
-    except BadRequest as e:
-        if "Message is not modified" not in str(e):
-            raise
-
+    await update.message.reply_text(
+        status_text(),
+        reply_markup=keyboard()
+    )
 
 # ================= TOP 100 =================
 
@@ -192,7 +159,6 @@ async def fetch_top_100():
     pairs.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
 
     return {x["symbol"].lower() for x in pairs[:TOP_LIMIT]}
-
 
 # ================= FORCE ORDER =================
 
@@ -248,7 +214,6 @@ async def listen_symbol(app: Application, symbol: str):
         except Exception:
             await asyncio.sleep(5)
 
-
 # ================= SYMBOL MANAGER =================
 
 async def symbol_manager(app: Application):
@@ -268,18 +233,13 @@ async def symbol_manager(app: Application):
 
         await asyncio.sleep(SYMBOL_REFRESH_SEC)
 
-
 # ================= POST INIT =================
 
 async def post_init(app: Application):
-    print("\n🚀 BOT STARTED\n")
-
     await load_top50_marketcap()
     await rebuild_blacklist()
 
     asyncio.create_task(symbol_manager(app))
-    asyncio.create_task(weekly_marketcap_update())
-
 
 # ================= MAIN =================
 
@@ -292,7 +252,7 @@ def main():
     )
 
     app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CallbackQueryHandler(buttons))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
     app.run_polling(close_loop=False)
 
