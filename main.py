@@ -126,18 +126,15 @@ async def weekly_marketcap_update():
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global min_liq_usd, marketcap_filter, symbols
 
-    if not update.message or not update.message.text:
-        return
+    text = update.message.text
 
-    text = update.message.text.strip()
-
-    print(f"[BUTTON PRESSED] {text}")  # лог для Railway
-
-    if text == "➕ 5k":
+    if text == "-5k":
         min_liq_usd += 5000
+        symbols.clear()  # ← важно
 
-    elif text == "➖ 5k":
+    elif text == "+5k":
         min_liq_usd = max(1000, min_liq_usd - 5000)
+        symbols.clear()  # ← важно
 
     elif text == "Все":
         marketcap_filter = 0
@@ -156,9 +153,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "📊 Статус":
         pass
-
-    else:
-        return
 
     await update.message.reply_text(
         status_text(),
@@ -297,5 +291,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
