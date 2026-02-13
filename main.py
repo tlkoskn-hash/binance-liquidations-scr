@@ -40,6 +40,14 @@ dynamic_blacklist = set()
 recent_events = set()
 
 # ================= TELEGRAM UI =================
+def main_keyboard():
+    return ReplyKeyboardMarkup(
+        [
+            ["📊 Статус", "⚙️ Настройки"],
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
 
 def settings_keyboard():
     return ReplyKeyboardMarkup(
@@ -321,6 +329,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
