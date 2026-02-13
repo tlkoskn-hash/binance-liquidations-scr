@@ -44,7 +44,7 @@ recent_events = set()
 def keyboard():
     return ReplyKeyboardMarkup(
         [
-            ["-5k", "+5k"],
+            ["+5k", "-5k"],
             ["Все", "-20 кап", "-50 кап"],
             ["📊 Статус"],
         ],
@@ -128,11 +128,11 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text
 
-    if text == "-5k":
+    if text == "+5k":
         min_liq_usd += 5000
         symbols.clear()  # ← важно
 
-    elif text == "+5k":
+    elif text == "-5k":
         min_liq_usd = max(1000, min_liq_usd - 5000)
         symbols.clear()  # ← важно
 
@@ -291,6 +291,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
