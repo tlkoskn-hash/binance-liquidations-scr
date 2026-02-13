@@ -41,16 +41,17 @@ recent_events = set()
 
 # ================= TELEGRAM UI =================
 
-def keyboard():
+def settings_keyboard():
     return ReplyKeyboardMarkup(
         [
             ["-5k", "+5k"],
             ["Все", "-20 кап", "-50 кап"],
-            ["📊 Статус"],
+            ["🔙 Назад"],
         ],
         resize_keyboard=True,
         is_persistent=True
     )
+
 
 
 def status_text():
@@ -69,8 +70,9 @@ def status_text():
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         status_text(),
-        reply_markup=keyboard()
+        reply_markup=main_keyboard()
     )
+
 
 # ================= MARKETCAP =================
 
@@ -128,13 +130,40 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text
 
+    # ===== Главное меню =====
+
+    if text == "📊 Статус":
+        await update.message.reply_text(
+            status_text(),
+            reply_markup=main_keyboard()
+        )
+        return
+
+    if text == "⚙️ Настройки":
+        await update.message.reply_text(
+            "⚙️ Меню настроек",
+            reply_markup=settings_keyboard()
+        )
+        return
+
+    if text == "🔙 Назад":
+        await update.message.reply_text(
+            status_text(),
+            reply_markup=main_keyboard()
+        )
+        return
+
+    # ===== Изменение суммы =====
+
     if text == "+5k":
         min_liq_usd += 5000
-        symbols.clear()  # ← важно
+        symbols.clear()
 
     elif text == "-5k":
         min_liq_usd = max(1000, min_liq_usd - 5000)
-        symbols.clear()  # ← важно
+        symbols.clear()
+
+    # ===== Фильтр капитализации =====
 
     elif text == "Все":
         marketcap_filter = 0
@@ -151,12 +180,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await rebuild_blacklist()
         symbols.clear()
 
-    elif text == "📊 Статус":
-        pass
+    else:
+        return
 
+    # После изменения остаёмся в меню настроек
     await update.message.reply_text(
         status_text(),
-        reply_markup=keyboard()
+        reply_markup=settings_keyboard()
     )
 
 # ================= TOP 100 =================
@@ -291,6 +321,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
