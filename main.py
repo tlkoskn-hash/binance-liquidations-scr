@@ -197,9 +197,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=settings_keyboard()
     )
 
-# ================= TOP 100 =================
+# ================= TOP 200 =================
 
-async def fetch_top_100():
+async def fetch_top_200():
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{BINANCE_REST}/fapi/v1/ticker/24hr") as r:
@@ -228,7 +228,7 @@ async def fetch_top_100():
         return {x["symbol"].lower() for x in pairs[:TOP_LIMIT]}
 
     except Exception as e:
-        print("FETCH_TOP_100 ERROR:", e)
+        print("FETCH_TOP_200 ERROR:", e)
         return set()
 
 # ================= FORCE ORDER =================
@@ -291,12 +291,12 @@ async def symbol_manager(app: Application):
     global symbols, tasks
 
     while True:
-        new_symbols = await fetch_top_100()
+        new_symbols = await fetch_top_200()
 
         sorted_list = sorted(new_symbols)
 
         print("\n==============================")
-        print("TOP 100 BY 24H VOLUME (USDT)")
+        print("TOP 200 BY 24H VOLUME (USDT)")
         print(f"Total: {len(sorted_list)}")
         for s in sorted_list:
             print(s.upper())
@@ -346,6 +346,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
