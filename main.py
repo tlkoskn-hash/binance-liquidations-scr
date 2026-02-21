@@ -25,7 +25,7 @@ BINANCE_REST = "https://fapi.binance.com"
 BINANCE_WS = "wss://fstream.binance.com/ws"
 COINGECKO_URL = "https://api.coingecko.com/api/v3/coins/markets"
 
-TOP_LIMIT = 100
+TOP_LIMIT = 200
 SYMBOL_REFRESH_SEC = 1800
 MARKETCAP_REFRESH_SEC = 7 * 24 * 60 * 60
 
@@ -200,19 +200,36 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= TOP 100 =================
 
 async def fetch_top_100():
-    async with aiohttp.ClientSession() as session:
-        async with session.get(f"{BINANCE_REST}/fapi/v1/ticker/24hr") as r:
-            data = await r.json()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{BINANCE_REST}/fapi/v1/ticker/24hr") as r:
 
-    pairs = [
-        x for x in data
-        if x.get("symbol", "").endswith("USDT")
-        and x["symbol"] not in dynamic_blacklist
-    ]
+                if r.status != 200:
+                    print("BINANCE ERROR STATUS:", r.status)
+                    text = await r.text()
+                    print(text)
+                    return set()
 
-    pairs.sort(key=lambda x: float(x["quoteVolume"]), reverse=True)
+                data = await r.json()
 
-    return {x["symbol"].lower() for x in pairs[:TOP_LIMIT]}
+        if not isinstance(data, list):
+            print("Unexpected Binance response:", data)
+            return set()
+
+        pairs = [
+            x for x in data
+            if isinstance(x, dict)
+            and x.get("symbol", "").endswith("USDT")
+            and x["symbol"] not in dynamic_blacklist
+        ]
+
+        pairs.sort(key=lambda x: float(x.get("quoteVolume", 0)), reverse=True)
+
+        return {x["symbol"].lower() for x in pairs[:TOP_LIMIT]}
+
+    except Exception as e:
+        print("FETCH_TOP_100 ERROR:", e)
+        return set()
 
 # ================= FORCE ORDER =================
 
@@ -329,6 +346,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
